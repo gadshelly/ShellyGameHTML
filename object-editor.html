@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Object Editor</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        label { display: block; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Object Editor</h1>
+    <form id="objectForm">
+        <label for="shape">Shape:</label>
+        <input type="text" id="shape" required>
+
+        <label for="size">Size:</label>
+        <input type="number" id="size" required>
+
+        <label for="tiles">Assigned Tiles:</label>
+        <input type="text" id="tiles" required>
+
+        <label for="solid">Solid:</label>
+        <input type="checkbox" id="solid">
+
+        <label for="slipperiness">Slipperiness:</label>
+        <input type="number" id="slipperiness" step="0.1">
+
+        <label for="damage">Damage Per Second:</label>
+        <input type="number" id="damage">
+
+        <label for="lightEmission">Light Emission:</label>
+        <input type="number" id="lightEmission">
+
+        <label for="speedEffect">Speed Effect:</label>
+        <input type="number" id="speedEffect">
+
+        <button type="submit">Create Object</button>
+    </form>
+
+    <script>
+        document.getElementById('objectForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const objectData = {
+                shape: document.getElementById('shape').value,
+                size: document.getElementById('size').value,
+                tiles: document.getElementById('tiles').value.split(','),
+                solid: document.getElementById('solid').checked,
+                slipperiness: document.getElementById('slipperiness').value || 0,
+                damage: document.getElementById('damage').value || 0,
+                lightEmission: document.getElementById('lightEmission').value || 0,
+                speedEffect: document.getElementById('speedEffect').value || 0,
+            };
+
+            const blob = new Blob([JSON.stringify(objectData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'game_object.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+</html>
