@@ -4,79 +4,96 @@
   <meta charset="UTF-8">
   <title>Object Editor</title>
   <style>
-    body { font-family: sans-serif; padding: 24px; }
-    h1 { margin-bottom: 16px; }
-    .grid-table { border-collapse: collapse; margin-bottom: 16px; }
-    .grid-table td {
-      border: 1px solid #888;
-      width: 64px; height: 64px;
+    body { font-family: 'Segoe UI', Arial, sans-serif; padding: 24px; background: #f9f9f9; }
+    h1 { margin-bottom: 16px; font-size: 2em; }
+    .container { max-width: 900px; margin: auto; background: white; padding: 32px 24px; border-radius: 12px; box-shadow: 0 4px 24px #0001; }
+    .flex-row { display: flex; gap: 16px; align-items: center; margin-bottom: 18px; }
+    .options-group { display: grid; grid-template-columns: repeat(2, minmax(140px, 1fr)); gap: 18px; margin-bottom: 24px; }
+    .option-label { font-weight: 500; }
+    .grid { display: grid; gap: 8px; margin-top: 12px; }
+    .tile-cell {
       background: #eee;
-      text-align: center; vertical-align: middle;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px #0001;
+      border: 2px solid #ddd;
+      width: 72px;
+      height: 72px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
       position: relative;
+      transition: background 0.2s;
     }
-    .grid-table td.disabled { background: #444; }
-    .enable-btn {
-      position: absolute; top: 2px; left: 2px;
-      background: #7e7; border: none; border-radius: 50%;
-      width: 18px; height: 18px; cursor: pointer; font-size: 12px;
+    .tile-cell.disabled { background: #444; opacity: 0.5; }
+    .toggle-btn {
+      position: absolute; top: 4px; left: 4px;
+      background: #2196f3; color: white; border: none; border-radius: 50%;
+      width: 20px; height: 20px; cursor: pointer; font-size: 13px; font-weight: bold;
+      box-shadow: 0 1px 4px #0002;
     }
-    .grid-table td.disabled .enable-btn { background: #e77; }
-    .tile-img { max-width: 48px; max-height: 48px; margin-top: 10px; }
-    .save-btn { padding: 10px 24px; font-size: 16px; font-weight: bold; margin-top: 16px; }
-    label { margin-right: 16px; }
-    input[type=number] { width: 40px; }
-    .option-row { margin-bottom: 8px; }
+    .tile-img { max-width: 54px; max-height: 54px; margin-top: 10px; border-radius: 6px; }
+    .upload-label { font-size: 0.95em; color: #666; }
+    .save-btn, .pick-btn {
+      padding: 12px 28px; font-size: 1.1em; font-weight: bold; border-radius: 8px; border: none; cursor: pointer;
+      background: #2196f3; color: white; margin-top: 24px; margin-right: 10px; box-shadow: 0 2px 8px #0001;
+      transition: background 0.2s;
+    }
+    .save-btn:hover, .pick-btn:hover { background: #1976d2; }
+    .section-title { font-size: 1.2em; margin: 22px 0 7px 0; border-bottom: 1px solid #eee; }
     .small-note { font-size: 12px; color: #999; margin-top: 8px; }
+    @media (max-width: 700px) {
+      .container { padding: 12px 4px; }
+      .grid { gap: 4px; }
+      .tile-cell { width: 48px; height: 48px; }
+      .options-group { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
-  <h1>Object Editor</h1>
-  <div>
-    <label>Name: <input type="text" id="objName"></label>
-    <label>Size:
-      <input type="number" min="1" id="objWidth" value="4"> x
-      <input type="number" min="1" id="objHeight" value="4"> (tiles)
-    </label>
-  </div>
-  <h3>Shape Grid</h3>
-  <table id="gridTable" class="grid-table"></table>
+  <div class="container">
+    <h1>Object Editor</h1>
+    <div class="flex-row">
+      <label class="option-label">Name: <input type="text" id="objName" style="font-size:1.1em; padding:5px 8px; border-radius:4px; border:1px solid #ccc;"></label>
+      <label class="option-label">Size:
+        <input type="number" min="1" id="objWidth" value="4" style="width:44px; font-size:1em;"> x
+        <input type="number" min="1" id="objHeight" value="4" style="width:44px; font-size:1em;"> (tiles)
+      </label>
+    </div>
 
-  <div class="option-row">
-    <label><input type="checkbox" id="solidOpt" checked> Solid</label>
-  </div>
-  <div class="option-row">
-    <label>Slipperiness:
-      <input type="range" min="0" max="20" id="slipOpt" value="0">
-      <span id="slipVal">0</span>
-    </label>
-  </div>
-  <div class="option-row">
-    <label>Damage Per Second:
-      <input type="range" min="0" max="20" id="dmgOpt" value="0">
-      <span id="dmgVal">0</span>
-    </label>
-  </div>
-  <div class="option-row">
-    <label>Light Emission:
-      <input type="range" min="0" max="20" id="lightOpt" value="0">
-      <span id="lightVal">0</span>
-    </label>
-  </div>
-  <div class="option-row">
-    <label>Speed Effect:
-      <input type="range" min="-20" max="20" id="speedOpt" value="0">
-      <span id="speedVal">0</span>
-    </label>
-  </div>
+    <div class="section-title">Shape Grid</div>
+    <div id="tileGrid"></div>
 
-  <button class="save-btn" onclick="saveObject()">Save to GameObjects</button>
-  <div class="small-note">(Saved file will download; move to GameObjects folder manually if needed)</div>
+    <div class="section-title">Object Properties</div>
+    <div class="options-group">
+      <label class="option-label"><input type="checkbox" id="solidOpt" checked> Solid</label>
+      <label class="option-label">Slipperiness:
+        <input type="range" min="0" max="20" id="slipOpt" value="0">
+        <span id="slipVal">0</span>
+      </label>
+      <label class="option-label">Damage Per Second:
+        <input type="range" min="0" max="20" id="dmgOpt" value="0">
+        <span id="dmgVal">0</span>
+      </label>
+      <label class="option-label">Light Emission:
+        <input type="range" min="0" max="20" id="lightOpt" value="0">
+        <span id="lightVal">0</span>
+      </label>
+      <label class="option-label">Speed Effect:
+        <input type="range" min="-20" max="20" id="speedOpt" value="0">
+        <span id="speedVal">0</span>
+      </label>
+    </div>
+    <button class="save-btn" onclick="saveObject()">Save Object</button>
+    <button class="pick-btn" onclick="pickSaveLocation()">Choose Save Location (if supported)</button>
+    <div class="small-note">If save location picker is not supported, file will be downloaded. Move to your desired folder manually.</div>
+  </div>
 
 <script>
 const objName = document.getElementById('objName');
 const objWidth = document.getElementById('objWidth');
 const objHeight = document.getElementById('objHeight');
-const gridTable = document.getElementById('gridTable');
+const tileGrid = document.getElementById('tileGrid');
 const solidOpt = document.getElementById('solidOpt');
 const slipOpt = document.getElementById('slipOpt');
 const slipVal = document.getElementById('slipVal');
@@ -88,6 +105,7 @@ const speedOpt = document.getElementById('speedOpt');
 const speedVal = document.getElementById('speedVal');
 
 let grid = [];
+let fileHandle = null;
 
 function updateGrid() {
   const w = parseInt(objWidth.value, 10) || 1;
@@ -100,59 +118,65 @@ function updateGrid() {
     grid[y] = grid[y].slice(0, w);
   }
 
-  // Render grid table
-  gridTable.innerHTML = '';
+  // Render grid
+  tileGrid.innerHTML = '';
+  tileGrid.className = 'grid';
+  tileGrid.style.gridTemplateColumns = `repeat(${w}, 1fr)`;
   for (let y = 0; y < h; ++y) {
-    const row = gridTable.insertRow();
     for (let x = 0; x < w; ++x) {
-      const cell = row.insertCell();
-      cell.className = grid[y][x].enabled ? '' : 'disabled';
+      const cellData = grid[y][x];
+      const cell = document.createElement('div');
+      cell.className = 'tile-cell' + (cellData.enabled ? '' : ' disabled');
 
-      // Enable/disable button
+      // Toggle enabled/disabled
       const btn = document.createElement('button');
-      btn.className = 'enable-btn';
-      btn.textContent = grid[y][x].enabled ? '✓' : '✗';
-      btn.title = grid[y][x].enabled ? "Disable" : "Enable";
-      btn.onclick = () => {
-        grid[y][x].enabled = !grid[y][x].enabled;
-        if (!grid[y][x].enabled) grid[y][x].tile = null; // Remove tile if disabling
+      btn.className = 'toggle-btn';
+      btn.textContent = cellData.enabled ? '✓' : '✗';
+      btn.title = cellData.enabled ? "Disable" : "Enable";
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        cellData.enabled = !cellData.enabled;
+        if (!cellData.enabled) cellData.tile = null;
         updateGrid();
       };
       cell.appendChild(btn);
 
-      // Tile display
-      const tileDiv = document.createElement('div');
-      if (grid[y][x].tile) {
+      // Show tile
+      if (cellData.tile) {
         const img = document.createElement('img');
-        img.src = grid[y][x].tile;
+        img.src = cellData.tile;
         img.className = 'tile-img';
-        tileDiv.appendChild(img);
+        cell.appendChild(img);
       } else {
         const span = document.createElement('span');
         span.style.color = "#999";
         span.textContent = "No tile";
-        tileDiv.appendChild(span);
+        cell.appendChild(span);
       }
-      cell.appendChild(tileDiv);
 
       // Upload input
+      const uploadLabel = document.createElement('label');
+      uploadLabel.className = 'upload-label';
+      uploadLabel.textContent = 'Tile:';
       const fileInput = document.createElement('input');
       fileInput.type = 'file';
       fileInput.accept = 'image/*';
-      fileInput.style.marginTop = '4px';
-      fileInput.style.width = '90%';
-      fileInput.disabled = !grid[y][x].enabled;
+      fileInput.disabled = !cellData.enabled;
+      fileInput.style.display = 'block';
       fileInput.onchange = function(e) {
         if (e.target.files && e.target.files[0]) {
           const reader = new FileReader();
           reader.onload = function(ev) {
-            grid[y][x].tile = ev.target.result;
+            cellData.tile = ev.target.result;
             updateGrid();
           };
           reader.readAsDataURL(e.target.files[0]);
         }
       };
-      cell.appendChild(fileInput);
+      uploadLabel.appendChild(fileInput);
+      cell.appendChild(uploadLabel);
+
+      tileGrid.appendChild(cell);
     }
   }
 }
@@ -160,13 +184,11 @@ function updateGrid() {
 objWidth.addEventListener('change', updateGrid);
 objHeight.addEventListener('change', updateGrid);
 
-// Sliders
 slipOpt.addEventListener('input', () => slipVal.textContent = slipOpt.value);
 dmgOpt.addEventListener('input', () => dmgVal.textContent = dmgOpt.value);
 lightOpt.addEventListener('input', () => lightVal.textContent = lightOpt.value);
 speedOpt.addEventListener('input', () => speedVal.textContent = speedOpt.value);
 
-// Solid logic
 function updateSolidOptions() {
   if (solidOpt.checked) {
     slipOpt.disabled = false;
@@ -184,12 +206,28 @@ function updateSolidOptions() {
 }
 solidOpt.addEventListener('change', updateSolidOptions);
 
-// Initial render
 updateGrid();
 updateSolidOptions();
 
-// Save function
-function saveObject() {
+// Save using File System Access API (if available)
+async function pickSaveLocation() {
+  if ('showSaveFilePicker' in window) {
+    try {
+      fileHandle = await window.showSaveFilePicker({
+        suggestedName: (objName.value || "object") + ".json",
+        types: [{ description: "JSON Files", accept: { "application/json": [".json"] } }]
+      });
+      alert("Save location selected! When you click 'Save Object', it will save to your chosen location.");
+    } catch (err) {
+      alert("Could not select save location: " + err);
+    }
+  } else {
+    alert("Your browser does not support save location picker. File will be downloaded instead.");
+    fileHandle = null;
+  }
+}
+
+async function saveObject() {
   const obj = {
     name: objName.value,
     width: parseInt(objWidth.value, 10) || 1,
@@ -201,19 +239,32 @@ function saveObject() {
     speedEffect: parseInt(speedOpt.value, 10),
     grid: grid.map(row => row.map(cell => ({
       enabled: cell.enabled,
-      tile: cell.tile // DataURL or null
+      tile: cell.tile
     })))
   };
   const dataStr = JSON.stringify(obj, null, 2);
-  const blob = new Blob([dataStr], {type: "application/json"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "GameObjects/" + (obj.name || "object") + ".json";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+
+  if (fileHandle && 'createWritable' in fileHandle) {
+    try {
+      const writable = await fileHandle.createWritable();
+      await writable.write(dataStr);
+      await writable.close();
+      alert("Object saved to chosen location!");
+    } catch (err) {
+      alert("Failed to save: " + err);
+    }
+  } else {
+    // fallback: download
+    const blob = new Blob([dataStr], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (obj.name || "object") + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 }
 </script>
 </body>
