@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Object Editor</title>
+  <style>
+    body { font-family: sans-serif; padding: 24px; }
+    h1 { margin-bottom: 16px; }
+    .grid-table { border-collapse: collapse; margin-bottom: 16px; }
+    .grid-table td {
+      border: 1px solid #888;
+      width: 64px; height: 64px;
+      background: #eee;
+      text-align: center; vertical-align: middle;
+      position: relative;
+    }
+    .grid-table td.disabled { background: #444; }
+    .enable-btn {
+      position: absolute; top: 2px; left: 2px;
+      background: #7e7; border: none; border-radius: 50%;
+      width: 18px; height: 18px; cursor: pointer; font-size: 12px;
+    }
+    .grid-table td.disabled .enable-btn { background: #e77; }
+    .tile-img { max-width: 48px; max-height: 48px; margin-top: 10px; }
+    .save-btn { padding: 10px 24px; font-size: 16px; font-weight: bold; margin-top: 16px; }
+    label { margin-right: 16px; }
+    input[type=number] { width: 40px; }
+    .option-row { margin-bottom: 8px; }
+    .small-note { font-size: 12px; color: #999; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Object Editor</h1>
+  <div>
+    <label>Name: <input type="text" id="objName"></label>
+    <label>Size:
+      <input type="number" min="1" id="objWidth" value="4"> x
+      <input type="number" min="1" id="objHeight" value="4"> (tiles)
+    </label>
+  </div>
+  <h3>Shape Grid</h3>
+  <table id="gridTable" class="grid-table"></table>
+
+  <div class="option-row">
+    <label><input type="checkbox" id="solidOpt" checked> Solid</label>
+  </div>
+  <div class="option-row">
+    <label>Slipperiness:
+      <input type="range" min="0" max="20" id="slipOpt" value="0">
+      <span id="slipVal">0</span>
+    </label>
+  </div>
+  <div class="option-row">
+    <label>Damage Per Second:
+      <input type="range" min="0" max="20" id="dmgOpt" value="0">
+      <span id="dmgVal">0</span>
+    </label>
+  </div>
+  <div class="option-row">
+    <label>Light Emission:
+      <input type="range" min="0" max="20" id="lightOpt" value="0">
+      <span id="lightVal">0</span>
+    </label>
+  </div>
+  <div class="option-row">
+    <label>Speed Effect:
+      <input type="range" min="-20" max="20" id="speedOpt" value="0">
+      <span id="speedVal">0</span>
+    </label>
+  </div>
+
+  <button class="save-btn" onclick="saveObject()">Save to GameObjects</button>
+  <div class="small-note">(Saved file will download; move to GameObjects folder manually if needed)</div>
+
+<script>
+const objName = document.getElementById('objName');
+const objWidth = document.getElementById('objWidth');
+const objHeight = document.getElementById('objHeight');
+const gridTable = document.getElementById('gridTable');
+const solidOpt = document.getElementById('solidOpt');
+const slipOpt = document.getElementById('slipOpt');
+const slipVal = document.getElementById('slipVal');
+const dmgOpt = document.getElementById('dmgOpt');
+const dmgVal = document.getElementById('dmgVal');
+const lightOpt = document.getElementById('lightOpt');
+const lightVal = document.getElementById('lightVal');
+const speedOpt = document.getElementById('speedOpt');
+const speedVal = document.getElementById('speedVal');
+
+let grid = [];
+
+function updateGrid() {
+  const w = parseInt(objWidth.value, 10) || 1;
+  const h = parseInt(objHeight.value, 10) || 1;
+  // Resize grid array
+  while (grid.length < h) grid.push([]);
+  grid = grid.slice(0, h);
+  for (let y = 0; y < h; ++y) {
+    while (grid[y].length < w) grid[y].push({enabled: true, tile: null});
+    grid[y] = grid[y].slice(0, w);
+  }
+
+  // Render grid table
+  gridTable.innerHTML = '';
+  for (let y = 0; y < h; ++y) {
+    const row = gridTable.insertRow();
+    for (let x = 0; x < w; ++x) {
+      const cell = row.insertCell();
+      cell.className = grid[y][x].enabled ? '' : 'disabled';
+
+      // Enable/disable button
+      const btn = document.createElement('button');
+      btn.className = 'enable-btn';
+      btn.textContent = grid[y][x].enabled ? '✓' : '✗';
+      btn.title = grid[y][x].enabled ? "Disable" : "Enable";
+      btn.onclick = () => {
+        grid[y][x].enabled = !grid[y][x].enabled;
+        if (!grid[y][x].enabled) grid[y][x].tile = null; // Remove tile if disabling
+        updateGrid();
+      };
+      cell.appendChild(btn);
+
+      // Tile display
+      const tileDiv = document.createElement('div');
+      if (grid[y][x].tile) {
+        const img = document.createElement('img');
+        img.src = grid[y][x].tile;
+        img.className = 'tile-img';
+        tileDiv.appendChild(img);
+      } else {
+        const span = document.createElement('span');
+        span.style.color = "#999";
+        span.textContent = "No tile";
+        tileDiv.appendChild(span);
+      }
+      cell.appendChild(tileDiv);
+
+      // Upload input
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.style.marginTop = '4px';
+      fileInput.style.width = '90%';
+      fileInput.disabled = !grid[y][x].enabled;
+      fileInput.onchange = function(e) {
+        if (e.target.files && e.target.files[0]) {
+          const reader = new FileReader();
+          reader.onload = function(ev) {
+            grid[y][x].tile = ev.target.result;
+            updateGrid();
+          };
+          reader.readAsDataURL(e.target.files[0]);
+        }
+      };
+      cell.appendChild(fileInput);
+    }
+  }
+}
+
+objWidth.addEventListener('change', updateGrid);
+objHeight.addEventListener('change', updateGrid);
+
+// Sliders
+slipOpt.addEventListener('input', () => slipVal.textContent = slipOpt.value);
+dmgOpt.addEventListener('input', () => dmgVal.textContent = dmgOpt.value);
+lightOpt.addEventListener('input', () => lightVal.textContent = lightOpt.value);
+speedOpt.addEventListener('input', () => speedVal.textContent = speedOpt.value);
+
+// Solid logic
+function updateSolidOptions() {
+  if (solidOpt.checked) {
+    slipOpt.disabled = false;
+    dmgOpt.disabled = false;
+    slipVal.textContent = slipOpt.value;
+    dmgVal.textContent = dmgOpt.value;
+  } else {
+    slipOpt.disabled = true;
+    dmgOpt.disabled = true;
+    slipOpt.value = "0";
+    dmgOpt.value = "0";
+    slipVal.textContent = "0";
+    dmgVal.textContent = "0";
+  }
+}
+solidOpt.addEventListener('change', updateSolidOptions);
+
+// Initial render
+updateGrid();
+updateSolidOptions();
+
+// Save function
+function saveObject() {
+  const obj = {
+    name: objName.value,
+    width: parseInt(objWidth.value, 10) || 1,
+    height: parseInt(objHeight.value, 10) || 1,
+    solid: solidOpt.checked,
+    slipperiness: solidOpt.checked ? parseInt(slipOpt.value, 10) : 0,
+    damagePerSecond: solidOpt.checked ? parseInt(dmgOpt.value, 10) : 0,
+    lightEmission: parseInt(lightOpt.value, 10),
+    speedEffect: parseInt(speedOpt.value, 10),
+    grid: grid.map(row => row.map(cell => ({
+      enabled: cell.enabled,
+      tile: cell.tile // DataURL or null
+    })))
+  };
+  const dataStr = JSON.stringify(obj, null, 2);
+  const blob = new Blob([dataStr], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "GameObjects/" + (obj.name || "object") + ".json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
