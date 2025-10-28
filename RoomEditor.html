@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Room Editor</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body{font-family:Segoe UI,Arial,sans-serif;background:#f7f9fb;margin:0;padding:18px}
+    .panel{max-width:1100px;margin:18px auto;background:#fff;padding:18px;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.06)}
+    h1{margin:0 0 14px 0;color:#1e88e5}
+    .row{display:flex;gap:12px;align-items:center}
+    .controls{display:flex;gap:8px;margin-bottom:12px}
+    button{background:#2196f3;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+    button.secondary{background:#eee;color:#222}
+    .editor{display:grid;grid-template-columns:1fr 320px;gap:18px}
+    .grid-wrap{background:#fafafa;padding:12px;border-radius:8px;min-height:360px}
+    #roomGrid{display:grid;gap:6px;background:#fff;padding:8px;border-radius:6px;border:1px solid #eee}
+    .tile{width:64px;height:64px;background:#f2f2f6;border-radius:6px;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;position:relative}
+    .tile.disabled{opacity:.4;background:#444}
+    .tile img{max-width:60px;max-height:60px;pointer-events:none}
+    .tile .obj{position:absolute;width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+    .sidebar{background:#fff;padding:12px;border-radius:8px;border:1px solid #eee;height:100%;display:flex;flex-direction:column}
+    .assets{flex:1;overflow:auto;padding:6px;border-radius:6px;background:#fcfcff}
+    .asset-item{display:inline-block;width:64px;height:64px;margin:6px;border:1px solid #eee;border-radius:6px;background:#fafafa;vertical-align:top;cursor:grab}
+    .asset-item img{max-width:60px;max-height:60px;display:block;margin:auto}
+    .tabs{display:flex;gap:6px;margin-top:8px}
+    .tab{padding:8px 10px;border-radius:6px;background:#f1f1f1;cursor:pointer}
+    .tab.active{background:#2196f3;color:#fff}
+    .mode-switch{margin-top:8px}
+    .meta{margin-top:8px;font-size:13px;color:#666}
+    .small{font-size:13px;color:#666}
+    .footer-controls{display:flex;gap:8px;align-items:center;margin-top:10px}
+    input[type=file]{display:none}
+    .drop-target{outline:2px dashed transparent}
+    .drop-target.over{outline:2px dashed #4caf50}
+    @media(max-width:900px){.editor{grid-template-columns:1fr}}  
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Room Editor</h1>
+
+    <div id="entryButtons" class="controls">
+      <button id="newRoomBtn">Create New Room</button>
+      <button id="loadRoomBtn" class="secondary">Load Room</button>
+      <input id="loadRoomFile" type="file" accept="application/json">
+      <div class="small">When creating a room you can switch between Place Objects and Create Background. Background tiles are behind objects.</div>
+    </div>
+
+    <div id="editorArea" style="display:none" class="editor">
+      <div class="grid-wrap">
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <div class="row">
+            <label class="small">Name: <input id="roomName" type="text" style="margin-left:8px;padding:6px;border-radius:6px;border:1px solid #ddd"></label>
+            <label class="small" style="margin-left:12px">Width: <input id="roomW" type="number" min="1" value="10" style="width:64px;margin-left:6px;padding:6px;border-radius:6px;border:1px solid #ddd"></label>
+            <label class="small" style="margin-left:8px">Height: <input id="roomH" type="number" min="1" value="8" style="width:64px;margin-left:6px;padding:6px;border-radius:6px;border:1px solid #ddd"></label>
+            <button id="resizeBtn" class="secondary" style="margin-left:8px">Resize Grid</button>
+          </div>
+          <div class="row">
+            <button id="saveRoomBtn">Save Room</button>
+            <button id="exportBtn" class="secondary">Export JSON</button>
+          </div>
+        </div>
+
+        <div id="roomGrid" aria-label="Room grid"></div>
+        <div class="meta small">Tip: Drag items from the assets panel at right and drop onto grid cells. Use the mode tabs to switch layers.</div>
+      </div>
+
+      <aside class="sidebar">
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div class="tabs">
+            <div id="tabObjects" class="tab active">Place Objects</div>
+            <div id="tabTiles" class="tab">Create Background</div>
+          </div>
+          <div class="mode-switch small">Layer: <strong id="activeLayer">Objects</strong></div>
+        </div>
+
+        <div class="assets" id="assetsPanel">
+          <!-- asset thumbnails will go here -->
+        </div>
+
+        <div style="margin-top:8px">
+          <label class="small">If assets do not load automatically, you can load them manually:</label>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <label style="background:#4caf50;color:#fff;padding:8px;border-radius:6px;cursor:pointer">Load Objects<input id="objFiles" type="file" accept="image/*" multiple></label>
+            <label style="background:#ff9800;color:#fff;padding:8px;border-radius:6px;cursor:pointer">Load Tiles<input id="tileFiles" type="file" accept="image/*" multiple></label>
+          </div>
+        </div>
+
+        <div class="footer-controls">
+          <button id="clearBtn" class="secondary">Clear Background</button>
+          <button id="clearObjectsBtn" class="secondary">Clear Objects</button>
+        </div>
+
+        <div class="small meta" style="margin-top:8px">Loaded objects/tiles are stored in-memory for this session only. Saving a room embeds the images as data URLs in the JSON.</div>
+      </aside>
+    </div>
+  </div>
+
+<script>
+// Room data model
+let room = {
+  name: '',
+  width: 10,
+  height: 8,
+  background: [], // 2D array of tile srcs or null
+  objects: [] // list of {x,y,src,id}
+};
+
+let assets = { objects: [], tiles: [] };
+let activeMode = 'objects'; // 'objects' or 'tiles'
+
+const entryButtons = document.getElementById('entryButtons');
+const newRoomBtn = document.getElementById('newRoomBtn');
+const loadRoomBtn = document.getElementById('loadRoomBtn');
+const loadRoomFile = document.getElementById('loadRoomFile');
+const editorArea = document.getElementById('editorArea');
+const roomGrid = document.getElementById('roomGrid');
+const roomName = document.getElementById('roomName');
+const roomW = document.getElementById('roomW');
+const roomH = document.getElementById('roomH');
+const resizeBtn = document.getElementById('resizeBtn');
+const assetsPanel = document.getElementById('assetsPanel');
+const tabObjects = document.getElementById('tabObjects');
+const tabTiles = document.getElementById('tabTiles');
+const activeLayer = document.getElementById('activeLayer');
+const objFiles = document.getElementById('objFiles');
+const tileFiles = document.getElementById('tileFiles');
+const saveRoomBtn = document.getElementById('saveRoomBtn');
+const exportBtn = document.getElementById('exportBtn');
+const clearBtn = document.getElementById('clearBtn');
+const clearObjectsBtn = document.getElementById('clearObjectsBtn');
+
+// Utilities
+function uid(){return Math.random().toString(36).slice(2,9)}
+
+function createEmptyGrid(w,h){
+  const g = [];
+  for(let y=0;y<h;y++){g[y]=[];for(let x=0;x<w;x++)g[y][x]=null}
+  return g;
+}
+
+function showEditor(){
+  entryButtons.style.display='none';
+  editorArea.style.display='grid';
+}
+
+newRoomBtn.addEventListener('click',()=>{
+  room.name='';room.width=10;room.height=8;room.background=createEmptyGrid(10,8);room.objects=[];
+  roomName.value='';roomW.value=10;roomH.value=8;renderGrid();showEditor();
+});
+
+loadRoomBtn.addEventListener('click',()=>loadRoomFile.click());
+loadRoomFile.addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f) return; const txt=await f.text(); try{const data=JSON.parse(txt);loadRoomFromData(data);showEditor()}catch(err){alert('Invalid JSON file')}
+});
+
+function loadRoomFromData(data){
+  room.name=data.name||'';room.width=data.width||10;room.height=data.height||8;
+  room.background=(data.background && data.background.length)?data.background:createEmptyGrid(room.width,room.height);
+  room.objects=data.objects||[];
+  roomName.value=room.name;roomW.value=room.width;roomH.value=room.height;renderGrid();
+}
+
+resizeBtn.addEventListener('click',()=>{
+  const w=parseInt(roomW.value,10)||1;const h=parseInt(roomH.value,10)||1;room.width=w;room.height=h;
+  // resize background
+  const newBg=createEmptyGrid(w,h);
+  for(let y=0;y<Math.min(h,room.background.length);y++)
+    for(let x=0;x<Math.min(w,room.background[0].length);x++) newBg[y][x]=room.background[y]?[room.background[y][x]]:null, newBg[y][x]=room.background[y][x];
+  room.background=newBg;
+  // remove objects outside bounds
+  room.objects = room.objects.filter(o => o.x<w && o.y<h);
+  renderGrid();
+});
+
+// Try to load manifests automatically (optional)
+async function tryLoadManifest(){
+  try{const r1=await fetch('/assets/objects/manifest.json'); if(r1.ok){const list=await r1.json();assets.objects=list.map(p=>'/assets/objects/'+p);}}
+  catch(e){}
+  try{const r2=await fetch('/assets/tiles/manifest.json'); if(r2.ok){const list=await r2.json();assets.tiles=list.map(p=>'/assets/tiles/'+p);}}
+  catch(e){}
+  // if assets loaded populate
+  populateAssets();
+}
+
+function populateAssets(){
+  assetsPanel.innerHTML='';
+  const list = (activeMode==='objects')?assets.objects:assets.tiles;
+  if(list.length===0){const note=document.createElement('div');note.className='small';note.textContent='No assets found. Use the Load buttons below to add images from your machine.';assetsPanel.appendChild(note);return}
+  list.forEach(src=>{
+    const item=document.createElement('div');item.className='asset-item';item.draggable=true;item.title=src;
+    const img=document.createElement('img');img.src=src;item.appendChild(img);
+    item.addEventListener('dragstart',ev=>{
+      ev.dataTransfer.setData('text/plain',JSON.stringify({src,mode:activeMode}));
+      ev.dataTransfer.effectAllowed='copy';
+    });
+    assetsPanel.appendChild(item);
+  });
+}
+
+// Handle manual file inputs
+objFiles.addEventListener('change',async e=>{
+  for(const f of e.target.files){
+    const data=await readFileAsDataURL(f); assets.objects.push(data);
+  }
+  if(activeMode==='objects') populateAssets();
+});
+
+tileFiles.addEventListener('change',async e=>{
+  for(const f of e.target.files){
+    const data=await readFileAsDataURL(f); assets.tiles.push(data);
+  }
+  if(activeMode==='tiles') populateAssets();
+});
+
+function readFileAsDataURL(f){return new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(f)})}
+
+// Tabs
+tabObjects.addEventListener('click',()=>{activeMode='objects';tabObjects.classList.add('active');tabTiles.classList.remove('active');activeLayer.textContent='Objects';populateAssets()});
+tabTiles.addEventListener('click',()=>{activeMode='tiles';tabTiles.classList.add('active');tabObjects.classList.remove('active');activeLayer.textContent='Background';populateAssets()});
+
+// Grid rendering and drag/drop
+function renderGrid(){
+  roomGrid.innerHTML='';
+  roomGrid.style.gridTemplateColumns = `repeat(${room.width}, 1fr)`;
+  roomGrid.style.width = `${room.width*70}px`;
+  for(let y=0;y<room.height;y++){
+    for(let x=0;x<room.width;x++){
+      const cell=document.createElement('div');cell.className='tile drop-target';cell.dataset.x=x;cell.dataset.y=y;
+
+      // background image if any
+      const bg = (room.background[y] && room.background[y][x])?room.background[y][x]:null;
+      if(bg){const bimg=document.createElement('img');bimg.src=bg; bimg.style.opacity='0.95'; cell.appendChild(bimg)}
+
+      // objects stacked above
+      const objsHere = room.objects.filter(o=>o.x==x && o.y==y);
+      if(objsHere.length){
+        const layer=document.createElement('div');layer.className='obj';
+        // show top-most object thumbnail
+        const oimg=document.createElement('img');oimg.src=objsHere[objsHere.length-1].src; oimg.style.maxWidth='60px';oimg.style.maxHeight='60px';layer.appendChild(oimg);cell.appendChild(layer);
+      }
+
+      // click behavior: remove object with right-click
+      cell.addEventListener('contextmenu',e=>{e.preventDefault(); // remove top object
+        const idx = room.objects.findIndex(o=>o.x==x && o.y==y);
+        if(idx>=0){room.objects.splice(idx,1);renderGrid()} };
+
+      // dragover/drop
+      cell.addEventListener('dragover',e=>{e.preventDefault();cell.classList.add('over');e.dataTransfer.dropEffect='copy'});
+      cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
+      cell.addEventListener('drop',e=>{
+        e.preventDefault();cell.classList.remove('over');
+        const txt = e.dataTransfer.getData('text/plain'); if(!txt) return; try{const data=JSON.parse(txt); placeAssetAt(data.src,parseInt(x),parseInt(y),data.mode)}catch(er){console.error(er)}
+      });
+
+      roomGrid.appendChild(cell);
+    }
+  }
+}
+
+function placeAssetAt(src,x,y,mode){
+  if(mode==='tiles' || (mode===undefined && activeMode==='tiles')){
+    // place background tile
+    room.background[y][x]=src; renderGrid();
+  } else {
+    // place object on top
+    room.objects.push({id:uid(),x,y,src}); renderGrid();
+  }
+}
+
+// Save/export
+exportBtn.addEventListener('click',()=>{
+  const data = JSON.stringify(room, null, 2);
+  const blob = new Blob([data],{type:'application/json'});
+  const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url;a.download=(room.name||'room')+'.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+});
+
+saveRoomBtn.addEventListener('click',async ()=>{
+  // Save using File System Access API if available
+  const data = JSON.stringify(room, null, 2);
+  if('showSaveFilePicker' in window){
+    try{
+      const handle = await window.showSaveFilePicker({suggestedName:(room.name||'room')+'.json',types:[{description:'JSON',accept:{'application/json':['.json']}}]});
+      const writable = await handle.createWritable(); await writable.write(data); await writable.close(); alert('Saved successfully')
+    }catch(err){alert('Save cancelled or failed: '+err)}
+  } else {
+    // fallback download
+    const blob=new Blob([data],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(room.name||'room')+'.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+  }
+});
+
+// Clear helpers
+clearBtn.addEventListener('click',()=>{room.background=createEmptyGrid(room.width,room.height);renderGrid()});
+clearObjectsBtn.addEventListener('click',()=>{room.objects=[];renderGrid()});
+
+// allow dropping external images into assets panel
+assetsPanel.addEventListener('dragover',e=>{e.preventDefault();assetsPanel.style.background='#eef'});
+assetsPanel.addEventListener('dragleave',e=>{assetsPanel.style.background=''});
+assetsPanel.addEventListener('drop',async e=>{e.preventDefault();assetsPanel.style.background='';
+  const items = Array.from(e.dataTransfer.files||[]);
+  for(const f of items){ if(f.type.startsWith('image/')){ const d=await readFileAsDataURL(f); (activeMode==='objects'?assets.objects:assets.tiles).push(d); }} populateAssets();
+});
+
+// keyboard shortcuts: Delete last object on selected cell (not implemented selection, so skip)
+
+// try load manifest and render
+room.background = createEmptyGrid(room.width,room.height);
+tryLoadManifest();
+renderGrid();
+
+</script>
+</body>
+</html>
