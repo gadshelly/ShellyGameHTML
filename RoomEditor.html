@@ -14,14 +14,16 @@
     button.secondary{background:#eee;color:#222}
     .editor{display:grid;grid-template-columns:1fr 320px;gap:18px}
     .grid-wrap{background:#fafafa;padding:12px;border-radius:8px;min-height:360px}
-    #roomGrid{display:grid;gap:6px;background:#fff;padding:8px;border-radius:6px;border:1px solid #eee}
-    .tile{width:64px;height:64px;background:#f2f2f6;border-radius:6px;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;position:relative}
+    /* grid container is relative to allow multi-tile objects as absolute overlays */
+    #roomGrid{display:grid;gap:6px;background:#fff;padding:8px;border-radius:6px;border:1px solid #eee;position:relative;overflow:auto}
+    .tile{width:64px;height:64px;background:#f2f2f6;border-radius:6px;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;position:relative;overflow:visible}
     .tile.disabled{opacity:.4;background:#444}
     .tile img{max-width:60px;max-height:60px;pointer-events:none}
-    .tile .obj{position:absolute;width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+    .placed-object{position:absolute;z-index:40;pointer-events:auto;display:flex;align-items:center;justify-content:center}
+    .placed-object img{width:100%;height:100%;object-fit:contain;pointer-events:none;border-radius:4px}
     .sidebar{background:#fff;padding:12px;border-radius:8px;border:1px solid #eee;height:100%;display:flex;flex-direction:column}
     .assets{flex:1;overflow:auto;padding:6px;border-radius:6px;background:#fcfcff}
-    .asset-item{display:inline-block;width:64px;height:64px;margin:6px;border:1px solid #eee;border-radius:6px;background:#fafafa;vertical-align:top;cursor:grab}
+    .asset-item{display:inline-block;width:64px;height:64px;margin:6px;border:1px solid #eee;border-radius:6px;background:#fafafa;vertical-align:top;cursor:grab;overflow:hidden;display:flex;align-items:center;justify-content:center}
     .asset-item img{max-width:60px;max-height:60px;display:block;margin:auto}
     .tabs{display:flex;gap:6px;margin-top:8px}
     .tab{padding:8px 10px;border-radius:6px;background:#f1f1f1;cursor:pointer}
@@ -82,7 +84,8 @@
         <div style="margin-top:8px">
           <label class="small">If assets do not load automatically, you can load them manually:</label>
           <div style="display:flex;gap:8px;margin-top:6px">
-            <label style="background:#4caf50;color:#fff;padding:8px;border-radius:6px;cursor:pointer">Load Objects<input id="objFiles" type="file" accept="image/*" multiple></label>
+            <!-- allow images and .json files for objects -->
+            <label style="background:#4caf50;color:#fff;padding:8px;border-radius:6px;cursor:pointer">Load Objects<input id="objFiles" type="file" accept="image/*,.json" multiple></label>
             <label style="background:#ff9800;color:#fff;padding:8px;border-radius:6px;cursor:pointer">Load Tiles<input id="tileFiles" type="file" accept="image/*" multiple></label>
           </div>
         </div>
@@ -98,18 +101,24 @@
   </div>
 
 <script>
-// Room data model
+// --- Model ---
 let room = {
   name: '',
   width: 10,
   height: 8,
   background: [], // 2D array of tile srcs or null
-  objects: [] // list of {x,y,src,id}
+  objects: [] // list of {id,x,y,w,h,grid,preview}
 };
 
 let assets = { objects: [], tiles: [] };
+// assets.objects can contain either:
+// - string (image src for single-tile object)
+// - { type: 'object', data: <parsed object JSON>, preview: <dataURL> }
 let activeMode = 'objects'; // 'objects' or 'tiles'
 
+const CELL_PX = 70; // approx tile width + gap used for overlay positioning (64 + 6 gap)
+
+// --- UI references ---
 const entryButtons = document.getElementById('entryButtons');
 const newRoomBtn = document.getElementById('newRoomBtn');
 const loadRoomBtn = document.getElementById('loadRoomBtn');
@@ -131,8 +140,8 @@ const exportBtn = document.getElementById('exportBtn');
 const clearBtn = document.getElementById('clearBtn');
 const clearObjectsBtn = document.getElementById('clearObjectsBtn');
 
-// Utilities
-function uid(){return Math.random().toString(36).slice(2,9)}
+// --- Utilities ---
+function uid(){ return Math.random().toString(36).slice(2,9); }
 
 function createEmptyGrid(w,h){
   const g = [];
@@ -145,6 +154,11 @@ function showEditor(){
   editorArea.style.display='grid';
 }
 
+function safeParseJSON(txt){
+  try { return JSON.parse(txt); } catch(e) { return null; }
+}
+
+// --- Entry buttons ---
 newRoomBtn.addEventListener('click',()=>{
   room.name=''; room.width=10; room.height=8; room.background=createEmptyGrid(10,8); room.objects=[];
   roomName.value=''; roomW.value=10; roomH.value=8; renderGrid(); showEditor();
@@ -155,24 +169,18 @@ loadRoomFile.addEventListener('change',async e=>{
   const f = e.target.files[0];
   if(!f) return;
   const txt = await f.text();
-  try{
-    const data = JSON.parse(txt);
-    loadRoomFromData(data);
-    showEditor();
-  } catch(err){
-    alert('Invalid JSON file');
-  }
+  const data = safeParseJSON(txt);
+  if(!data){ alert('Invalid JSON file'); return; }
+  loadRoomFromData(data);
+  showEditor();
 });
 
 function loadRoomFromData(data){
   room.name = data.name || '';
   room.width = data.width || 10;
   room.height = data.height || 8;
-  if (Array.isArray(data.background) && data.background.length) {
-    room.background = data.background;
-  } else {
-    room.background = createEmptyGrid(room.width, room.height);
-  }
+  if (Array.isArray(data.background) && data.background.length) room.background = data.background;
+  else room.background = createEmptyGrid(room.width, room.height);
   room.objects = Array.isArray(data.objects) ? data.objects : [];
   roomName.value = room.name;
   roomW.value = room.width;
@@ -180,100 +188,192 @@ function loadRoomFromData(data){
   renderGrid();
 }
 
+// --- Resize ---
 resizeBtn.addEventListener('click',()=>{
   const w = parseInt(roomW.value,10) || 1;
   const h = parseInt(roomH.value,10) || 1;
-  // resize background
   const newBg = createEmptyGrid(w,h);
-  for(let y=0; y<Math.min(h, room.background.length); y++){
-    for(let x=0; x<Math.min(w, (room.background[0] ? room.background[0].length : 0)); x++){
+  for(let y=0; y<Math.min(h, room.background.length); y++){ 
+    for(let x=0; x<Math.min(w, (room.background[0] ? room.background[0].length : 0)); x++){ 
       newBg[y][x] = room.background[y] && room.background[y][x] ? room.background[y][x] : null;
     }
   }
   room.background = newBg;
-  // remove objects outside bounds
-  room.objects = room.objects.filter(o => o.x < w && o.y < h);
+  room.objects = room.objects.filter(o => (o.x < w) && (o.y < h) && (o.x + (o.w||1) <= w) && (o.y + (o.h||1) <= h));
   room.width = w;
   room.height = h;
   renderGrid();
 });
 
-// Try to load manifests automatically (optional)
+// --- Asset manifest attempt ---
 async function tryLoadManifest(){
   try{
     const r1 = await fetch('/assets/objects/manifest.json');
     if(r1.ok){ const list = await r1.json(); assets.objects = list.map(p=>'/assets/objects/'+p); }
-  } catch(e){ /* ignore */ }
+  } catch(e){}
   try{
     const r2 = await fetch('/assets/tiles/manifest.json');
     if(r2.ok){ const list = await r2.json(); assets.tiles = list.map(p=>'/assets/tiles/'+p); }
-  } catch(e){ /* ignore */ }
-  // populate assets panel for active mode
+  } catch(e){}
   populateAssets();
 }
 
+// --- Create a preview for an object JSON (tries to render grid tiles if available) ---
+async function makePreviewFromObjectJson(objJson){
+  // expect objJson to contain either:
+  // - grid: 2D array of tile srcs (data URLs or asset paths)
+  // - image: single image data URL or path
+  if(objJson.image){
+    return objJson.image;
+  }
+  const grid = objJson.grid;
+  if(!Array.isArray(grid) || grid.length === 0) return null;
+  const tilePx = 32; // preview tile size
+  const w = grid[0].length;
+  const h = grid.length;
+  const canvas = document.createElement('canvas');
+  canvas.width = w * tilePx;
+  canvas.height = h * tilePx;
+  const ctx = canvas.getContext('2d');
+  // helper to load an image
+  const loadImg = (src) => new Promise((res) => {
+    const i = new Image();
+    i.crossOrigin = 'anonymous';
+    i.onload = () => res(i);
+    i.onerror = () => res(null);
+    i.src = src;
+  });
+  for(let y=0;y<h;y++){ 
+    for(let x=0;x<w;x++){ 
+      const src = grid[y][x];
+      if(!src) continue;
+      try{
+        const img = await loadImg(src);
+        if(img) ctx.drawImage(img, x*tilePx, y*tilePx, tilePx, tilePx);
+      }catch(e){}
+    }
+  }
+  return canvas.toDataURL('image/png');
+}
+
+// --- Populate assets panel ---
 function populateAssets(){
   assetsPanel.innerHTML = '';
   const list = (activeMode === 'objects') ? assets.objects : assets.tiles;
   if(!list || list.length === 0){
     const note = document.createElement('div');
     note.className = 'small';
-    note.textContent = 'No assets found. Use the Load buttons below to add images from your machine.';
+    note.textContent = 'No assets found. Use the Load buttons below to add images or .json object files from your machine.';
     assetsPanel.appendChild(note);
     return;
   }
-  list.forEach(src=>{
-    const item = document.createElement('div');
-    item.className = 'asset-item';
-    item.draggable = true;
-    item.title = src;
-    const img = document.createElement('img');
-    img.src = src;
-    item.appendChild(img);
-    item.addEventListener('dragstart', ev=>{
-      ev.dataTransfer.setData('text/plain', JSON.stringify({src, mode: activeMode}));
+  list.forEach(item => {
+    const itemEl = document.createElement('div');
+    itemEl.className = 'asset-item';
+    itemEl.draggable = true;
+
+    // item can be:
+    // - string (image path)
+    // - object: { type:'object', data:..., preview:... }
+    let previewSrc = null;
+    if(typeof item === 'string'){
+      previewSrc = item;
+      itemEl.title = item;
+      itemEl.dataset.type = 'image';
+      itemEl.dataset.src = item;
+    } else if(item && item.type === 'object'){
+      previewSrc = item.preview || null;
+      itemEl.title = item.data && item.data.name ? item.data.name : 'Object';
+      itemEl.dataset.type = 'object';
+      itemEl.dataset.obj = JSON.stringify(item.data);
+      // keep preview data-url for drag
+      if(previewSrc) itemEl.dataset.preview = previewSrc;
+    }
+
+    if(previewSrc){
+      const img = document.createElement('img');
+      img.src = previewSrc;
+      itemEl.appendChild(img);
+    } else {
+      const span = document.createElement('div');
+      span.className = 'small';
+      span.textContent = (item && item.type==='object' && item.data && item.data.name) ? item.data.name : 'No preview';
+      itemEl.appendChild(span);
+    }
+
+    itemEl.addEventListener('dragstart', ev => {
+      // attach a JSON payload describing the asset
+      if(itemEl.dataset.type === 'image'){
+        ev.dataTransfer.setData('text/plain', JSON.stringify({ assetType: 'image', src: itemEl.dataset.src }));
+      } else {
+        // object
+        const objData = JSON.parse(itemEl.dataset.obj);
+        ev.dataTransfer.setData('text/plain', JSON.stringify({ assetType: 'object', objectData: objData, preview: itemEl.dataset.preview || null }));
+      }
       ev.dataTransfer.effectAllowed = 'copy';
     });
-    assetsPanel.appendChild(item);
+
+    assetsPanel.appendChild(itemEl);
   });
 }
 
-// Handle manual file inputs
+// --- File inputs (objects accept images and .json) ---
 objFiles.addEventListener('change', async e=>{
   for(const f of e.target.files){
-    const data = await readFileAsDataURL(f);
-    assets.objects.push(data);
+    if(f.type === 'application/json' || f.name.endsWith('.json')){
+      // object definition JSON
+      const txt = await f.text();
+      const parsed = safeParseJSON(txt);
+      if(parsed){
+        // determine width/height from grid or provided fields
+        parsed.width = parsed.width || (Array.isArray(parsed.grid) && parsed.grid[0] ? parsed.grid[0].length : 1);
+        parsed.height = parsed.height || (Array.isArray(parsed.grid) ? parsed.grid.length : 1);
+        const preview = await makePreviewFromObjectJson(parsed) || null;
+        assets.objects.push({ type: 'object', data: parsed, preview });
+      } else {
+        // ignore invalid json
+        console.warn('Invalid object JSON skipped:', f.name);
+      }
+    } else if(f.type.startsWith('image/')){
+      const dataUrl = await readFileAsDataURL(f);
+      assets.objects.push(dataUrl);
+    }
   }
   if(activeMode==='objects') populateAssets();
 });
 
 tileFiles.addEventListener('change', async e=>{
   for(const f of e.target.files){
-    const data = await readFileAsDataURL(f);
-    assets.tiles.push(data);
+    if(f.type.startsWith('image/')){
+      const dataUrl = await readFileAsDataURL(f);
+      assets.tiles.push(dataUrl);
+    }
   }
   if(activeMode==='tiles') populateAssets();
 });
 
-function readFileAsDataURL(f){ return new Promise(res=>{ const r = new FileReader(); r.onload = ()=>res(r.result); r.readAsDataURL(f); }); }
+function readFileAsDataURL(f){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(f); }); }
 
-// Tabs
+// --- Tabs ---
 tabObjects.addEventListener('click', ()=>{ activeMode='objects'; tabObjects.classList.add('active'); tabTiles.classList.remove('active'); activeLayer.textContent='Objects'; populateAssets(); });
 tabTiles.addEventListener('click', ()=>{ activeMode='tiles'; tabTiles.classList.add('active'); tabObjects.classList.remove('active'); activeLayer.textContent='Background'; populateAssets(); });
 
-// Grid rendering and drag/drop
+// --- Grid rendering ---
+// We render per-cell backgrounds in the grid, and render objects as absolute overlays using their w/h so multi-tile objects occupy correct space.
 function renderGrid(){
   roomGrid.innerHTML = '';
   roomGrid.style.gridTemplateColumns = `repeat(${room.width}, 1fr)`;
-  roomGrid.style.width = `${room.width * 70}px`; // approximate width for scroller
-  for(let y=0; y<room.height; y++){
-    for(let x=0; x<room.width; x++){
+  // set approximate pixel width so scroll works; CELL_PX includes gap approximation
+  roomGrid.style.width = `${room.width * CELL_PX}px`;
+
+  // create cell elements (backgrounds)
+  for(let y=0;y<room.height;y++){ 
+    for(let x=0;x<room.width;x++){ 
       const cell = document.createElement('div');
       cell.className = 'tile drop-target';
       cell.dataset.x = x;
       cell.dataset.y = y;
 
-      // background image if any
       const bg = (room.background[y] && room.background[y][x]) ? room.background[y][x] : null;
       if(bg){
         const bimg = document.createElement('img');
@@ -282,67 +382,174 @@ function renderGrid(){
         cell.appendChild(bimg);
       }
 
-      // objects stacked above
-      const objsHere = room.objects.filter(o => o.x == x && o.y == y);
-      if(objsHere.length){
-        const layer = document.createElement('div');
-        layer.className = 'obj';
-        const oimg = document.createElement('img');
-        oimg.src = objsHere[objsHere.length - 1].src;
-        oimg.style.maxWidth = '60px';
-        oimg.style.maxHeight = '60px';
-        layer.appendChild(oimg);
-        cell.appendChild(layer);
-      }
-
-      // click behavior: remove top object with right-click
-      cell.addEventListener('contextmenu', e => {
-        e.preventDefault();
-        // remove top-most object at this cell
-        for (let i = room.objects.length - 1; i >= 0; i--) {
-          if (room.objects[i].x == x && room.objects[i].y == y) {
-            room.objects.splice(i, 1);
-            renderGrid();
-            break;
-          }
-        }
-      });
-
-      // dragover/drop
+      // drop events for placing (we use cell coordinates)
       cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('over'); e.dataTransfer.dropEffect = 'copy'; });
       cell.addEventListener('dragleave', () => cell.classList.remove('over'));
       cell.addEventListener('drop', e => {
         e.preventDefault();
         cell.classList.remove('over');
-        const txt = e.dataTransfer.getData('text/plain');
-        if(!txt) return;
+        const txt = e.dataTransfer.getData('text/plain'); if(!txt) return;
         try {
-          const data = JSON.parse(txt);
-          placeAssetAt(data.src, parseInt(x,10), parseInt(y,10), data.mode);
-        } catch(err) {
-          console.error(err);
-        }
+          const payload = JSON.parse(txt);
+          if(payload.assetType === 'image'){
+            // tile or single-tile object
+            if(activeMode === 'tiles' || payload.assetType === 'image' && activeMode === 'tiles') {
+              placeAssetAt(payload.src, parseInt(x,10), parseInt(y,10), 'tiles');
+            } else {
+              placeAssetAt(payload.src, parseInt(x,10), parseInt(y,10), 'objects');
+            }
+          } else if(payload.assetType === 'object'){
+            placeParsedObjectAt(payload.objectData, parseInt(x,10), parseInt(y,10));
+          }
+        } catch(err){ console.error(err); }
       });
 
       roomGrid.appendChild(cell);
     }
   }
+
+  // overlay objects (so they appear above cells)
+  // create a container to hold overlays (not strictly necessary but keeps structure)
+  const overlays = document.createElement('div');
+  overlays.style.position = 'absolute';
+  overlays.style.left = '8px'; // align with grid padding
+  overlays.style.top = '8px';
+  overlays.style.pointerEvents = 'none'; // individual overlays will enable events
+  overlays.style.width = '100%';
+  overlays.style.height = '100%';
+  overlays.style.zIndex = 20;
+  roomGrid.appendChild(overlays);
+
+  // draw each object as an overlay
+  room.objects.forEach(obj => {
+    const w = obj.w || 1;
+    const h = obj.h || 1;
+    const left = obj.x * CELL_PX;
+    const top = obj.y * CELL_PX;
+    const width = w * CELL_PX - 6; // little adjustment to avoid overflowing gaps
+    const height = h * CELL_PX - 6;
+    const overlay = document.createElement('div');
+    overlay.className = 'placed-object';
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+    overlay.style.pointerEvents = 'auto';
+    overlay.dataset.objectId = obj.id;
+    overlay.title = obj.name || 'object';
+
+    const img = document.createElement('img');
+    // Prefer explicit preview if present, else if object provides a grid we try to make a quick canvas preview, else use src
+    if(obj.preview) img.src = obj.preview;
+    else if(obj.src) img.src = obj.src;
+    else if(obj.grid && Array.isArray(obj.grid)) {
+      // try to compose the grid into a small canvas on the fly
+      makeSmallPreviewFromGrid(obj.grid, w, h).then(dataUrl => { img.src = dataUrl; }).catch(()=>{});
+    }
+    overlay.appendChild(img);
+
+    // right-click on overlay removes that object
+    overlay.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      const idx = room.objects.findIndex(o=>o.id === obj.id);
+      if(idx >= 0){ room.objects.splice(idx,1); renderGrid(); }
+    });
+
+    roomGrid.appendChild(overlay);
+  });
 }
 
+// Compose a compact preview dataURL for a placed object's grid (used if no precomputed preview)
+function makeSmallPreviewFromGrid(grid, w, h){
+  return new Promise(async (res) => {
+    const tilePx = 32;
+    const canvas = document.createElement('canvas');
+    canvas.width = w * tilePx;
+    canvas.height = h * tilePx;
+    const ctx = canvas.getContext('2d');
+    const loadImg = (src) => new Promise((r) => {
+      const i = new Image();
+      i.crossOrigin = 'anonymous';
+      i.onload = () => r(i);
+      i.onerror = () => r(null);
+      i.src = src;
+    });
+    for(let y=0;y<h;y++){ 
+      for(let x=0;x<w;x++){ 
+        const src = grid[y] && grid[y][x] ? grid[y][x] : null;
+        if(!src) continue;
+        const img = await loadImg(src);
+        if(img) ctx.drawImage(img, x*tilePx, y*tilePx, tilePx, tilePx);
+      }
+    }
+    res(canvas.toDataURL('image/png'));
+  });
+}
+
+// --- Placing assets ---
+// place simple image src (tile or single-tile object)
 function placeAssetAt(src, x, y, mode){
   if(mode === 'tiles' || (mode === undefined && activeMode === 'tiles')){
-    // place background tile
     if(!room.background || !Array.isArray(room.background)) room.background = createEmptyGrid(room.width, room.height);
     room.background[y][x] = src;
     renderGrid();
   } else {
-    // place object on top
-    room.objects.push({ id: uid(), x, y, src });
+    // single-tile object
+    const obj = { id: uid(), x, y, w:1, h:1, src, name: null, preview: src };
+    room.objects.push(obj);
     renderGrid();
   }
 }
 
-// Save/export
+// place parsed object JSON (multi-tile footprint supported)
+function placeParsedObjectAt(parsedObj, x, y){
+  const w = parsedObj.width || (parsedObj.grid && parsedObj.grid[0] ? parsedObj.grid[0].length : 1);
+  const h = parsedObj.height || (parsedObj.grid ? parsedObj.grid.length : 1);
+  // basic bounds check: if object doesn't fit, adjust or reject
+  if(x + w > room.width || y + h > room.height){
+    // simple behavior: reject placement and notify
+    alert('Object does not fit at that position. Resize room or place elsewhere.');
+    return;
+  }
+  const objEntry = {
+    id: uid(),
+    x, y,
+    w, h,
+    grid: parsedObj.grid || null,
+    src: parsedObj.image || null,
+    name: parsedObj.name || null,
+    preview: parsedObj._preview || null
+  };
+  room.objects.push(objEntry);
+  renderGrid();
+}
+
+// --- Drag & drop to assets panel (allow dropping image files and object JSON)\nassetsPanel.addEventListener('dragover', e => { e.preventDefault(); assetsPanel.style.background = '#eef'; });
+assetsPanel.addEventListener('dragleave', e => { assetsPanel.style.background = ''; });
+assetsPanel.addEventListener('drop', async e => {
+  e.preventDefault();
+  assetsPanel.style.background = '';
+  const items = Array.from(e.dataTransfer.files || []);
+  for(const f of items){
+    if(f.type.startsWith('image/')){
+      const d = await readFileAsDataURL(f);
+      if(activeMode === 'objects') assets.objects.push(d);
+      else assets.tiles.push(d);
+    } else if(f.type === 'application/json' || f.name.endsWith('.json')){
+      const txt = await f.text();
+      const parsed = safeParseJSON(txt);
+      if(parsed){
+        parsed.width = parsed.width || (Array.isArray(parsed.grid) && parsed.grid[0] ? parsed.grid[0].length : 1);
+        parsed.height = parsed.height || (Array.isArray(parsed.grid) ? parsed.grid.length : 1);
+        const preview = await makePreviewFromObjectJson(parsed).catch(()=>null);
+        assets.objects.push({ type: 'object', data: parsed, preview });
+      }
+    }
+  }
+  populateAssets();
+});
+
+// --- Save/export ---
 exportBtn.addEventListener('click', ()=>{
   const data = JSON.stringify(room, null, 2);
   const blob = new Blob([data], { type: 'application/json' });
@@ -369,7 +576,6 @@ saveRoomBtn.addEventListener('click', async ()=>{
       alert('Save cancelled or failed: ' + err);
     }
   } else {
-    // fallback download
     const blob = new Blob([data], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -382,28 +588,11 @@ saveRoomBtn.addEventListener('click', async ()=>{
   }
 });
 
-// Clear helpers
+// --- Clear helpers ---
 clearBtn.addEventListener('click', ()=>{ room.background = createEmptyGrid(room.width, room.height); renderGrid(); });
 clearObjectsBtn.addEventListener('click', ()=>{ room.objects = []; renderGrid(); });
 
-// allow dropping external images into assets panel
-assetsPanel.addEventListener('dragover', e => { e.preventDefault(); assetsPanel.style.background = '#eef'; });
-assetsPanel.addEventListener('dragleave', e => { assetsPanel.style.background = ''; });
-assetsPanel.addEventListener('drop', async e => {
-  e.preventDefault();
-  assetsPanel.style.background = '';
-  const items = Array.from(e.dataTransfer.files || []);
-  for(const f of items){
-    if(f.type.startsWith('image/')){
-      const d = await readFileAsDataURL(f);
-      if(activeMode === 'objects') assets.objects.push(d);
-      else assets.tiles.push(d);
-    }
-  }
-  populateAssets();
-});
-
-// initialize
+// --- Init ---
 room.background = createEmptyGrid(room.width, room.height);
 tryLoadManifest();
 renderGrid();
