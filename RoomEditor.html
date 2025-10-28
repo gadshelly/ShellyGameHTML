@@ -136,7 +136,7 @@ function uid(){return Math.random().toString(36).slice(2,9)}
 
 function createEmptyGrid(w,h){
   const g = [];
-  for(let y=0;y<h;y++){g[y]=[];for(let x=0;x<w;x++)g[y][x]=null}
+  for(let y=0;y<h;y++){ g[y]=[]; for(let x=0;x<w;x++) g[y][x]=null; }
   return g;
 }
 
@@ -146,112 +146,182 @@ function showEditor(){
 }
 
 newRoomBtn.addEventListener('click',()=>{
-  room.name='';room.width=10;room.height=8;room.background=createEmptyGrid(10,8);room.objects=[];
-  roomName.value='';roomW.value=10;roomH.value=8;renderGrid();showEditor();
+  room.name=''; room.width=10; room.height=8; room.background=createEmptyGrid(10,8); room.objects=[];
+  roomName.value=''; roomW.value=10; roomH.value=8; renderGrid(); showEditor();
 });
 
-loadRoomBtn.addEventListener('click',()=>loadRoomFile.click());
+loadRoomBtn.addEventListener('click',()=> loadRoomFile.click());
 loadRoomFile.addEventListener('change',async e=>{
-  const f=e.target.files[0]; if(!f) return; const txt=await f.text(); try{const data=JSON.parse(txt);loadRoomFromData(data);showEditor()}catch(err){alert('Invalid JSON file')}
+  const f = e.target.files[0];
+  if(!f) return;
+  const txt = await f.text();
+  try{
+    const data = JSON.parse(txt);
+    loadRoomFromData(data);
+    showEditor();
+  } catch(err){
+    alert('Invalid JSON file');
+  }
 });
 
 function loadRoomFromData(data){
-  room.name=data.name||'';room.width=data.width||10;room.height=data.height||8;
-  room.background=(data.background && data.background.length)?data.background:createEmptyGrid(room.width,room.height);
-  room.objects=data.objects||[];
-  roomName.value=room.name;roomW.value=room.width;roomH.value=room.height;renderGrid();
+  room.name = data.name || '';
+  room.width = data.width || 10;
+  room.height = data.height || 8;
+  if (Array.isArray(data.background) && data.background.length) {
+    room.background = data.background;
+  } else {
+    room.background = createEmptyGrid(room.width, room.height);
+  }
+  room.objects = Array.isArray(data.objects) ? data.objects : [];
+  roomName.value = room.name;
+  roomW.value = room.width;
+  roomH.value = room.height;
+  renderGrid();
 }
 
 resizeBtn.addEventListener('click',()=>{
-  const w=parseInt(roomW.value,10)||1;const h=parseInt(roomH.value,10)||1;room.width=w;room.height=h;
+  const w = parseInt(roomW.value,10) || 1;
+  const h = parseInt(roomH.value,10) || 1;
   // resize background
-  const newBg=createEmptyGrid(w,h);
-  for(let y=0;y<Math.min(h,room.background.length);y++)
-    for(let x=0;x<Math.min(w,room.background[0].length);x++) newBg[y][x]=room.background[y]?[room.background[y][x]]:null, newBg[y][x]=room.background[y][x];
-  room.background=newBg;
+  const newBg = createEmptyGrid(w,h);
+  for(let y=0; y<Math.min(h, room.background.length); y++){
+    for(let x=0; x<Math.min(w, (room.background[0] ? room.background[0].length : 0)); x++){
+      newBg[y][x] = room.background[y] && room.background[y][x] ? room.background[y][x] : null;
+    }
+  }
+  room.background = newBg;
   // remove objects outside bounds
-  room.objects = room.objects.filter(o => o.x<w && o.y<h);
+  room.objects = room.objects.filter(o => o.x < w && o.y < h);
+  room.width = w;
+  room.height = h;
   renderGrid();
 });
 
 // Try to load manifests automatically (optional)
 async function tryLoadManifest(){
-  try{const r1=await fetch('/assets/objects/manifest.json'); if(r1.ok){const list=await r1.json();assets.objects=list.map(p=>'/assets/objects/'+p);}}
-  catch(e){}
-  try{const r2=await fetch('/assets/tiles/manifest.json'); if(r2.ok){const list=await r2.json();assets.tiles=list.map(p=>'/assets/tiles/'+p);}}
-  catch(e){}
-  // if assets loaded populate
+  try{
+    const r1 = await fetch('/assets/objects/manifest.json');
+    if(r1.ok){ const list = await r1.json(); assets.objects = list.map(p=>'/assets/objects/'+p); }
+  } catch(e){ /* ignore */ }
+  try{
+    const r2 = await fetch('/assets/tiles/manifest.json');
+    if(r2.ok){ const list = await r2.json(); assets.tiles = list.map(p=>'/assets/tiles/'+p); }
+  } catch(e){ /* ignore */ }
+  // populate assets panel for active mode
   populateAssets();
 }
 
 function populateAssets(){
-  assetsPanel.innerHTML='';
-  const list = (activeMode==='objects')?assets.objects:assets.tiles;
-  if(list.length===0){const note=document.createElement('div');note.className='small';note.textContent='No assets found. Use the Load buttons below to add images from your machine.';assetsPanel.appendChild(note);return}
+  assetsPanel.innerHTML = '';
+  const list = (activeMode === 'objects') ? assets.objects : assets.tiles;
+  if(!list || list.length === 0){
+    const note = document.createElement('div');
+    note.className = 'small';
+    note.textContent = 'No assets found. Use the Load buttons below to add images from your machine.';
+    assetsPanel.appendChild(note);
+    return;
+  }
   list.forEach(src=>{
-    const item=document.createElement('div');item.className='asset-item';item.draggable=true;item.title=src;
-    const img=document.createElement('img');img.src=src;item.appendChild(img);
-    item.addEventListener('dragstart',ev=>{
-      ev.dataTransfer.setData('text/plain',JSON.stringify({src,mode:activeMode}));
-      ev.dataTransfer.effectAllowed='copy';
+    const item = document.createElement('div');
+    item.className = 'asset-item';
+    item.draggable = true;
+    item.title = src;
+    const img = document.createElement('img');
+    img.src = src;
+    item.appendChild(img);
+    item.addEventListener('dragstart', ev=>{
+      ev.dataTransfer.setData('text/plain', JSON.stringify({src, mode: activeMode}));
+      ev.dataTransfer.effectAllowed = 'copy';
     });
     assetsPanel.appendChild(item);
   });
 }
 
 // Handle manual file inputs
-objFiles.addEventListener('change',async e=>{
+objFiles.addEventListener('change', async e=>{
   for(const f of e.target.files){
-    const data=await readFileAsDataURL(f); assets.objects.push(data);
+    const data = await readFileAsDataURL(f);
+    assets.objects.push(data);
   }
   if(activeMode==='objects') populateAssets();
 });
 
-tileFiles.addEventListener('change',async e=>{
+tileFiles.addEventListener('change', async e=>{
   for(const f of e.target.files){
-    const data=await readFileAsDataURL(f); assets.tiles.push(data);
+    const data = await readFileAsDataURL(f);
+    assets.tiles.push(data);
   }
   if(activeMode==='tiles') populateAssets();
 });
 
-function readFileAsDataURL(f){return new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(f)})}
+function readFileAsDataURL(f){ return new Promise(res=>{ const r = new FileReader(); r.onload = ()=>res(r.result); r.readAsDataURL(f); }); }
 
 // Tabs
-tabObjects.addEventListener('click',()=>{activeMode='objects';tabObjects.classList.add('active');tabTiles.classList.remove('active');activeLayer.textContent='Objects';populateAssets()});
-tabTiles.addEventListener('click',()=>{activeMode='tiles';tabTiles.classList.add('active');tabObjects.classList.remove('active');activeLayer.textContent='Background';populateAssets()});
+tabObjects.addEventListener('click', ()=>{ activeMode='objects'; tabObjects.classList.add('active'); tabTiles.classList.remove('active'); activeLayer.textContent='Objects'; populateAssets(); });
+tabTiles.addEventListener('click', ()=>{ activeMode='tiles'; tabTiles.classList.add('active'); tabObjects.classList.remove('active'); activeLayer.textContent='Background'; populateAssets(); });
 
 // Grid rendering and drag/drop
 function renderGrid(){
-  roomGrid.innerHTML='';
+  roomGrid.innerHTML = '';
   roomGrid.style.gridTemplateColumns = `repeat(${room.width}, 1fr)`;
-  roomGrid.style.width = `${room.width*70}px`;
-  for(let y=0;y<room.height;y++){
-    for(let x=0;x<room.width;x++){
-      const cell=document.createElement('div');cell.className='tile drop-target';cell.dataset.x=x;cell.dataset.y=y;
+  roomGrid.style.width = `${room.width * 70}px`; // approximate width for scroller
+  for(let y=0; y<room.height; y++){
+    for(let x=0; x<room.width; x++){
+      const cell = document.createElement('div');
+      cell.className = 'tile drop-target';
+      cell.dataset.x = x;
+      cell.dataset.y = y;
 
       // background image if any
-      const bg = (room.background[y] && room.background[y][x])?room.background[y][x]:null;
-      if(bg){const bimg=document.createElement('img');bimg.src=bg; bimg.style.opacity='0.95'; cell.appendChild(bimg)}
-
-      // objects stacked above
-      const objsHere = room.objects.filter(o=>o.x==x && o.y==y);
-      if(objsHere.length){
-        const layer=document.createElement('div');layer.className='obj';
-        // show top-most object thumbnail
-        const oimg=document.createElement('img');oimg.src=objsHere[objsHere.length-1].src; oimg.style.maxWidth='60px';oimg.style.maxHeight='60px';layer.appendChild(oimg);cell.appendChild(layer);
+      const bg = (room.background[y] && room.background[y][x]) ? room.background[y][x] : null;
+      if(bg){
+        const bimg = document.createElement('img');
+        bimg.src = bg;
+        bimg.style.opacity = '0.95';
+        cell.appendChild(bimg);
       }
 
-      // click behavior: remove object with right-click
-      cell.addEventListener('contextmenu',e=>{e.preventDefault(); // remove top object
-        const idx = room.objects.findIndex(o=>o.x==x && o.y==y);
-        if(idx>=0){room.objects.splice(idx,1);renderGrid()} };
+      // objects stacked above
+      const objsHere = room.objects.filter(o => o.x == x && o.y == y);
+      if(objsHere.length){
+        const layer = document.createElement('div');
+        layer.className = 'obj';
+        const oimg = document.createElement('img');
+        oimg.src = objsHere[objsHere.length - 1].src;
+        oimg.style.maxWidth = '60px';
+        oimg.style.maxHeight = '60px';
+        layer.appendChild(oimg);
+        cell.appendChild(layer);
+      }
+
+      // click behavior: remove top object with right-click
+      cell.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        // remove top-most object at this cell
+        for (let i = room.objects.length - 1; i >= 0; i--) {
+          if (room.objects[i].x == x && room.objects[i].y == y) {
+            room.objects.splice(i, 1);
+            renderGrid();
+            break;
+          }
+        }
+      });
 
       // dragover/drop
-      cell.addEventListener('dragover',e=>{e.preventDefault();cell.classList.add('over');e.dataTransfer.dropEffect='copy'});
-      cell.addEventListener('dragleave',()=>cell.classList.remove('over'));
-      cell.addEventListener('drop',e=>{
-        e.preventDefault();cell.classList.remove('over');
-        const txt = e.dataTransfer.getData('text/plain'); if(!txt) return; try{const data=JSON.parse(txt); placeAssetAt(data.src,parseInt(x),parseInt(y),data.mode)}catch(er){console.error(er)}
+      cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('over'); e.dataTransfer.dropEffect = 'copy'; });
+      cell.addEventListener('dragleave', () => cell.classList.remove('over'));
+      cell.addEventListener('drop', e => {
+        e.preventDefault();
+        cell.classList.remove('over');
+        const txt = e.dataTransfer.getData('text/plain');
+        if(!txt) return;
+        try {
+          const data = JSON.parse(txt);
+          placeAssetAt(data.src, parseInt(x,10), parseInt(y,10), data.mode);
+        } catch(err) {
+          console.error(err);
+        }
       });
 
       roomGrid.appendChild(cell);
@@ -259,53 +329,82 @@ function renderGrid(){
   }
 }
 
-function placeAssetAt(src,x,y,mode){
-  if(mode==='tiles' || (mode===undefined && activeMode==='tiles')){
+function placeAssetAt(src, x, y, mode){
+  if(mode === 'tiles' || (mode === undefined && activeMode === 'tiles')){
     // place background tile
-    room.background[y][x]=src; renderGrid();
+    if(!room.background || !Array.isArray(room.background)) room.background = createEmptyGrid(room.width, room.height);
+    room.background[y][x] = src;
+    renderGrid();
   } else {
     // place object on top
-    room.objects.push({id:uid(),x,y,src}); renderGrid();
+    room.objects.push({ id: uid(), x, y, src });
+    renderGrid();
   }
 }
 
 // Save/export
-exportBtn.addEventListener('click',()=>{
+exportBtn.addEventListener('click', ()=>{
   const data = JSON.stringify(room, null, 2);
-  const blob = new Blob([data],{type:'application/json'});
-  const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url;a.download=(room.name||'room')+'.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (room.name || 'room') + '.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 });
 
-saveRoomBtn.addEventListener('click',async ()=>{
-  // Save using File System Access API if available
+saveRoomBtn.addEventListener('click', async ()=>{
   const data = JSON.stringify(room, null, 2);
   if('showSaveFilePicker' in window){
     try{
-      const handle = await window.showSaveFilePicker({suggestedName:(room.name||'room')+'.json',types:[{description:'JSON',accept:{'application/json':['.json']}}]});
-      const writable = await handle.createWritable(); await writable.write(data); await writable.close(); alert('Saved successfully')
-    }catch(err){alert('Save cancelled or failed: '+err)}
+      const handle = await window.showSaveFilePicker({ suggestedName:(room.name||'room')+'.json', types:[{ description:'JSON', accept:{ 'application/json': ['.json'] } }] });
+      const writable = await handle.createWritable();
+      await writable.write(data);
+      await writable.close();
+      alert('Saved successfully');
+    } catch(err){
+      alert('Save cancelled or failed: ' + err);
+    }
   } else {
     // fallback download
-    const blob=new Blob([data],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(room.name||'room')+'.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+    const blob = new Blob([data], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (room.name || 'room') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 });
 
 // Clear helpers
-clearBtn.addEventListener('click',()=>{room.background=createEmptyGrid(room.width,room.height);renderGrid()});
-clearObjectsBtn.addEventListener('click',()=>{room.objects=[];renderGrid()});
+clearBtn.addEventListener('click', ()=>{ room.background = createEmptyGrid(room.width, room.height); renderGrid(); });
+clearObjectsBtn.addEventListener('click', ()=>{ room.objects = []; renderGrid(); });
 
 // allow dropping external images into assets panel
-assetsPanel.addEventListener('dragover',e=>{e.preventDefault();assetsPanel.style.background='#eef'});
-assetsPanel.addEventListener('dragleave',e=>{assetsPanel.style.background=''});
-assetsPanel.addEventListener('drop',async e=>{e.preventDefault();assetsPanel.style.background='';
-  const items = Array.from(e.dataTransfer.files||[]);
-  for(const f of items){ if(f.type.startsWith('image/')){ const d=await readFileAsDataURL(f); (activeMode==='objects'?assets.objects:assets.tiles).push(d); }} populateAssets();
+assetsPanel.addEventListener('dragover', e => { e.preventDefault(); assetsPanel.style.background = '#eef'; });
+assetsPanel.addEventListener('dragleave', e => { assetsPanel.style.background = ''; });
+assetsPanel.addEventListener('drop', async e => {
+  e.preventDefault();
+  assetsPanel.style.background = '';
+  const items = Array.from(e.dataTransfer.files || []);
+  for(const f of items){
+    if(f.type.startsWith('image/')){
+      const d = await readFileAsDataURL(f);
+      if(activeMode === 'objects') assets.objects.push(d);
+      else assets.tiles.push(d);
+    }
+  }
+  populateAssets();
 });
 
-// keyboard shortcuts: Delete last object on selected cell (not implemented selection, so skip)
-
-// try load manifest and render
-room.background = createEmptyGrid(room.width,room.height);
+// initialize
+room.background = createEmptyGrid(room.width, room.height);
 tryLoadManifest();
 renderGrid();
 
