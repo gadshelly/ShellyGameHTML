@@ -89,15 +89,132 @@
           <label class="small">If assets do not load automatically, you can load them manually:</label>
           <div style="display:flex;gap:8px;margin-top:6px">
             <!-- allow images and .json files for objects -->
-            <label style="background:#4caf50;color:#fff;padding:8px;border-radius:6px;cursor:pointer">Load Objects<input id="objFiles" type="file" accept="image/*,.json" multiple></label>
-            <label style="background:#ff9800;color:#fff;padding:8px;border-radius:6px;cursor:pointer">Load Tiles<input id="tileFiles" type="file" accept="image/*" multiple></label>
+            <label style="backgro
           </div>
         </div>
+      </aside>
+    </div>
+  </div>
 
-        <div class="footer-controls">
-          <button id="clearBtn" class="secondary">Clear Background</button>
-          <button id="clearObjectsBtn" class="secondary">Clear Objects</button>
-        </div>
-...
+  <script>
+  // Minimal wiring so the initial buttons work immediately.
+  // This script provides:
+  // - new room: shows the editor and creates a simple grid
+  // - load room: open file picker, parse JSON and populate the grid
+  // - resize, export json, and a demo save action
+  (function(){
+    const newRoomBtn = document.getElementById('newRoomBtn');
+    const loadRoomBtn = document.getElementById('loadRoomBtn');
+    const loadRoomFile = document.getElementById('loadRoomFile');
+    const editorArea = document.getElementById('editorArea');
+    const roomGrid = document.getElementById('roomGrid');
+    const roomName = document.getElementById('roomName');
+    const roomW = document.getElementById('roomW');
+    const roomH = document.getElementById('roomH');
+    const resizeBtn = document.getElementById('resizeBtn');
+    const saveRoomBtn = document.getElementById('saveRoomBtn');
+    const exportBtn = document.getElementById('exportBtn');
+
+    function showEditor(){
+      if(editorArea.style.display === 'none'){
+        editorArea.style.display = 'grid';
+      }
+    }
+
+    function buildGrid(width, height){
+      width = Math.max(1, Math.floor(width) || 10);
+      height = Math.max(1, Math.floor(height) || 8);
+      roomGrid.innerHTML = '';
+      // set explicit CSS grid columns
+      roomGrid.style.gridTemplateColumns = `repeat(${width}, 64px)`;
+      roomGrid.style.gridAutoRows = '64px';
+      for(let y=0;y<height;y++){
+        for(let x=0;x<width;x++){
+          const t = document.createElement('div');
+          t.className = 'tile';
+          t.dataset.x = x;
+          t.dataset.y = y;
+          // optionally show coordinates for debug
+          // t.textContent = `${x},${y}`;
+          roomGrid.appendChild(t);
+        }
+      }
+      // scroll to top-left to make UX consistent when grid changes
+      roomGrid.scrollTop = 0;
+      roomGrid.scrollLeft = 0;
+    }
+
+    newRoomBtn.addEventListener('click', function(){
+      // ensure editor visible and build grid using current W/H
+      showEditor();
+      const w = parseInt(roomW.value, 10) || 10;
+      const h = parseInt(roomH.value, 10) || 8;
+      if(!roomName.value) roomName.value = 'New Room';
+      buildGrid(w, h);
+    });
+
+    loadRoomBtn.addEventListener('click', function(){
+      // delegate to hidden file input
+      loadRoomFile.click();
+    });
+
+    loadRoomFile.addEventListener('change', function(e){
+      const file = e.target.files && e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = function(ev){
+        try {
+          const data = JSON.parse(ev.target.result);
+          // Basic compatibility: read width/height/name
+          roomName.value = data.name || data.title || roomName.value || 'Loaded Room';
+          roomW.value = data.width || data.w || roomW.value;
+          roomH.value = data.height || data.h || roomH.value;
+          showEditor();
+          buildGrid(parseInt(roomW.value,10), parseInt(roomH.value,10));
+          // Note: placing objects/tiles from JSON is left as a next step.
+        } catch(err) {
+          alert('Error parsing JSON: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+      // reset so same file can be picked again
+      e.target.value = '';
+    });
+
+    resizeBtn.addEventListener('click', function(){
+      const w = parseInt(roomW.value, 10) || 1;
+      const h = parseInt(roomH.value, 10) || 1;
+      buildGrid(w, h);
+    });
+
+    exportBtn.addEventListener('click', function(){
+      const w = parseInt(roomW.value,10) || 10;
+      const h = parseInt(roomH.value,10) || 8;
+      const payload = {
+        name: roomName.value || 'room',
+        width: w,
+        height: h,
+        // objects/tiles can be added here in future
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (roomName.value || 'room') + '.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    saveRoomBtn.addEventListener('click', function(){
+      // Demo save - replace with server call or local-storage as needed
+      alert('Room saved locally (demo). Implement persistent save if required.');
+    });
+
+    // Optionally, initialize a simple default so clicking "Create New Room" after load behaves predictably
+    // No automatic action on load to keep the page idle until user clicks.
+  })();
+  </script>
 </body>
 </html>
