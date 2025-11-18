@@ -23,11 +23,12 @@
     .placed-object img{width:100%;height:100%;object-fit:contain;pointer-events:none;border-radius:4px}
     .placed-object .grid-inner{width:100%;height:100%;display:grid;grid-gap:0}
     .sidebar{background:#fff;padding:12px;border-radius:8px;border:1px solid #eee;height:100%;display:flex;flex-direction:column}
-    .assets{flex:1;overflow:auto;padding:6px;border-radius:6px;background:#fcfcff}
-    .asset-item{display:inline-block;width:64px;height:64px;margin:6px;border:1px solid #eee;border-radius:6px;background:#fafafa;vertical-align:top;cursor:grab;overflow:hidden;display:flex;align-items:center;justify-content:center}
-    .asset-item img{max-width:60px;max-height:60px;display:block;margin:auto}
-    .asset-mini-grid{width:100%;height:100%;display:grid;grid-gap:0}
-    .asset-mini-grid img{width:100%;height:100%;object-fit:cover}
+    .assets{flex:1;overflow:auto;padding:6px;border-radius:6px;background:#fcfcff;min-height:120px}
+    .asset-item{width:64px;height:64px;margin:6px;border:1px solid #eee;border-radius:6px;background:#fafafa;vertical-align:top;cursor:grab;overflow:hidden;display:inline-flex;align-items:center;justify-content:center}
+    .asset-item img{max-width:64px;max-height:64px;display:block;margin:auto}
+    .asset-mini-grid{width:100%;height:100%;display:grid;grid-gap:0;align-items:stretch;justify-items:stretch}
+    .asset-mini-grid img{width:100%;height:100%;object-fit:cover;display:block}
+    .asset-mini-grid > div{width:100%;height:100%}
     .tabs{display:flex;gap:6px;margin-top:8px}
     .tab{padding:8px 10px;border-radius:6px;background:#f1f1f1;cursor:pointer}
     .tab.active{background:#2196f3;color:#fff}
@@ -116,7 +117,7 @@ let room = {
 let assets = { objects: [], tiles: [] };
 // assets.objects entries:
 // - string (image src for 1x1 object)
-// - { type:'object', data: <parsed JSON>, preview: <dataURL> }
+// - { type:'object', data: <parsed JSON>, preview: <dataURL>, srcUrl: <jsonUrl> }
 let activeMode = 'objects'; // 'objects' or 'tiles'
 
 const CELL_PX = 70; // pixel size used for positioning overlays
@@ -151,8 +152,7 @@ function createEmptyGrid(w,h){
   for(let y=0;y<h;y++){ g[y]=[]; for(let x=0;x<w;x++) g[y][x]=null; }
   return g;
 }
-function safeParseJSON(txt){ try { return JSON.parse(txt); } catch(e){ return null; }
-}
+function safeParseJSON(txt){ try { return JSON.parse(txt); } catch(e){ return null; } }
 
 function showEditor(){ entryButtons.style.display='none'; editorArea.style.display='grid'; }
 
@@ -165,6 +165,15 @@ function isAreaFree(x,y,w,h){
     if(overlap) return false;
   }
   return true;
+}
+
+// resolve a possibly-relative tile path against a base URL if provided
+function resolveAssetSrc(base, src){
+  if(!src) return src;
+  // data:, absolute http(s), or root-absolute should be left as-is
+  if(src.startsWith('data:') || src.startsWith('http:') || src.startsWith('https:') || src.startsWith('/')) return src;
+  if(!base) return src;
+  try { return new URL(src, base).href; } catch(e) { return src; }
 }
 
 // --- Entry buttons ---
@@ -211,15 +220,52 @@ resizeBtn.addEventListener('click',()=>{
 });
 
 // --- Asset manifest attempt ---
+// Improved: manifest can reference image files or .json object descriptors. If a .json is found, fetch and store its data
 async function tryLoadManifest(){
-  try{ const r1 = await fetch('/assets/objects/manifest.json'); if(r1.ok){ const list = await r1.json(); assets.objects = list.map(p=>'/assets/objects/'+p); } } catch(e){}
-  try{ const r2 = await fetch('/assets/tiles/manifest.json'); if(r2.ok){ const list = await r2.json(); assets.tiles = list.map(p=>'/assets/tiles/'+p); } } catch(e){}
+  try{
+    const r1 = await fetch('/assets/objects/manifest.json');
+    if(r1.ok){
+      const list = await r1.json();
+      for(const p of list){
+        const url = '/assets/objects/' + p;
+        if(p.toLowerCase().endsWith('.json')){
+          try{
+            const r = await fetch(url);
+            if(r.ok){
+              const parsed = await r.json();
+              parsed.width = parsed.width || (Array.isArray(parsed.grid) && parsed.grid[0] ? parsed.grid[0].length : 1);
+              parsed.height = parsed.height || (Array.isArray(parsed.grid) ? parsed.grid.length : 1);
+              parsed._srcUrl = url; // remember where JSON came from so relative tile paths can be resolved
+              const preview = await makePreviewFromObjectJson(parsed, url).catch(()=>null);
+              assets.objects.push({ type:'object', data: parsed, preview, srcUrl: url });
+            } else {
+              // fallback: treat as image path
+              assets.objects.push(url);
+            }
+          }catch(e){
+            assets.objects.push(url);
+          }
+        } else {
+          // image file
+          assets.objects.push(url);
+        }
+      }
+    }
+  } catch(e){}
+  try{
+    const r2 = await fetch('/assets/tiles/manifest.json');
+    if(r2.ok){
+      const list = await r2.json();
+      assets.tiles = assets.tiles.concat(list.map(p=>'/assets/tiles/'+p));
+    }
+  } catch(e){}
   populateAssets();
 }
 
 // create preview for object JSON (compose grid into one preview if possible)
-async function makePreviewFromObjectJson(objJson){
-  if(objJson.image) return objJson.image;
+// accepts optional baseUrl to resolve relative tile addresses
+async function makePreviewFromObjectJson(objJson, baseUrl){
+  if(objJson.image) return resolveAssetSrc(baseUrl || objJson._srcUrl || objJson.srcUrl, objJson.image);
   const grid = objJson.grid;
   if(!Array.isArray(grid) || grid.length===0) return null;
   const tilePx = 32;
@@ -227,7 +273,8 @@ async function makePreviewFromObjectJson(objJson){
   const canvas = document.createElement('canvas'); canvas.width = w*tilePx; canvas.height = h*tilePx;
   const ctx = canvas.getContext('2d');
   const loadImg = src => new Promise(res=>{
-    const i = new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src;
+    const i = new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null);
+    i.src = resolveAssetSrc(baseUrl || objJson._srcUrl || objJson.srcUrl, src);
   });
   for(let yy=0; yy<h; yy++){
     for(let xx=0; xx<w; xx++){
@@ -240,7 +287,7 @@ async function makePreviewFromObjectJson(objJson){
 }
 
 // create a mini DOM grid element to preview object's tiles in the palette
-function createMiniGridElement(grid){
+function createMiniGridElement(grid, baseUrl){
   const w = (Array.isArray(grid) && grid[0]) ? grid[0].length : 1;
   const h = Array.isArray(grid) ? grid.length : 1;
   const el = document.createElement('div');
@@ -250,7 +297,7 @@ function createMiniGridElement(grid){
     for(let xx=0; xx<w; xx++){
       const cell = document.createElement('div');
       const src = grid[yy] && grid[yy][xx] ? grid[yy][xx] : null;
-      if(src){ const img = document.createElement('img'); img.src = src; cell.appendChild(img); }
+      if(src){ const img = document.createElement('img'); img.src = resolveAssetSrc(baseUrl, src); cell.appendChild(img); }
       el.appendChild(cell);
     }
   }
@@ -268,6 +315,7 @@ async function populateAssets(){
     assetsPanel.appendChild(note);
     return;
   }
+
   for(const item of list){
     const itemEl = document.createElement('div');
     itemEl.className = 'asset-item';
@@ -277,18 +325,21 @@ async function populateAssets(){
       itemEl.title = item; itemEl.dataset.type = 'image'; itemEl.dataset.src = item;
       const img = document.createElement('img'); img.src = item; itemEl.appendChild(img);
     } else if(item && item.type === 'object'){
-      itemEl.dataset.type = 'object'; itemEl.dataset.obj = JSON.stringify(item.data);
+      itemEl.dataset.type = 'object';
+      // store serialized data for drag, but keep srcUrl separately so we can reconstruct base resolving
+      itemEl.dataset.obj = JSON.stringify(item.data);
+      if(item.srcUrl) itemEl.dataset.srcurl = item.srcUrl;
       itemEl.title = item.data && item.data.name ? item.data.name : 'Object';
       // prefer preview data URL if present
       if(item.preview){
         const img = document.createElement('img'); img.src = item.preview; itemEl.appendChild(img);
         itemEl.dataset.preview = item.preview;
       } else if(item.data && item.data.grid){
-        // render small DOM grid preview so user sees tiles even without canvas preview
-        const mini = createMiniGridElement(item.data.grid);
+        // render a small DOM grid preview so user sees tiles even without canvas preview
+        const mini = createMiniGridElement(item.data.grid, item.srcUrl || item.data._srcUrl);
         itemEl.appendChild(mini);
       } else if(item.data && item.data.image){
-        const img = document.createElement('img'); img.src = item.data.image; itemEl.appendChild(img);
+        const img = document.createElement('img'); img.src = resolveAssetSrc(item.srcUrl || item.data._srcUrl, item.data.image); itemEl.appendChild(img);
       } else {
         const span = document.createElement('div'); span.className='small'; span.textContent = 'No preview'; itemEl.appendChild(span);
       }
@@ -298,7 +349,9 @@ async function populateAssets(){
       if(itemEl.dataset.type === 'image'){
         ev.dataTransfer.setData('text/plain', JSON.stringify({ assetType: 'image', src: itemEl.dataset.src }));
       } else {
+        // include the srcUrl so receiver can resolve relative tile paths
         const objData = JSON.parse(itemEl.dataset.obj);
+        if(itemEl.dataset.srcurl) objData._srcUrl = itemEl.dataset.srcurl;
         ev.dataTransfer.setData('text/plain', JSON.stringify({ assetType: 'object', objectData: objData, preview: itemEl.dataset.preview || null }));
       }
       ev.dataTransfer.effectAllowed = 'copy';
@@ -315,8 +368,16 @@ objFiles.addEventListener('change', async e=>{
       const txt = await f.text(); const parsed = safeParseJSON(txt); if(!parsed){ console.warn('Invalid object JSON skipped:', f.name); continue; }
       parsed.width = parsed.width || (Array.isArray(parsed.grid) && parsed.grid[0] ? parsed.grid[0].length : 1);
       parsed.height = parsed.height || (Array.isArray(parsed.grid) ? parsed.grid.length : 1);
-      const preview = await makePreviewFromObjectJson(parsed).catch(()=>null);
-      assets.objects.push({ type:'object', data: parsed, preview });
+      // create an object URL so relative image paths can be resolved against it (useful for webkitdirectory or similar setups)
+      try {
+        // create a blob URL with the JSON file so new URL(relative, blobUrl) will work for some cases
+        const blobUrl = URL.createObjectURL(new Blob([txt], { type: 'application/json' }));
+        parsed._srcUrl = blobUrl;
+      } catch(e){
+        parsed._srcUrl = null;
+      }
+      const preview = await makePreviewFromObjectJson(parsed, parsed._srcUrl).catch(()=>null);
+      assets.objects.push({ type:'object', data: parsed, preview, srcUrl: parsed._srcUrl });
     } else if(f.type.startsWith('image/')){
       const dataUrl = await readFileAsDataURL(f); assets.objects.push(dataUrl);
     }
@@ -404,12 +465,29 @@ function placeAssetAt(src,x,y,mode){
 }
 
 function placeParsedObjectAt(parsedObj,x,y){
+  // Resolve size
   const w = parsedObj.width || (parsedObj.grid && parsedObj.grid[0] ? parsedObj.grid[0].length : 1);
   const h = parsedObj.height || (parsedObj.grid ? parsedObj.grid.length : 1);
   if(x + w > room.width || y + h > room.height){ alert('Object does not fit at that position. Resize room or place elsewhere.'); return; }
   if(!isAreaFree(x,y,w,h)){ alert('Cannot place object: it would overlap another object.'); return; }
-  const objEntry = { id: uid(), x, y, w, h, grid: parsedObj.grid || null, src: parsedObj.image || null, name: parsedObj.name || null, preview: parsedObj._preview || null };
-  room.objects.push(objEntry); renderGrid();
+
+  // Resolve grid tile sources to fully-qualified URLs (using parsedObj._srcUrl or parsedObj.srcUrl if present)
+  const base = parsedObj._srcUrl || parsedObj.srcUrl || null;
+  let resolvedGrid = null;
+  if(parsedObj.grid && Array.isArray(parsedObj.grid)){
+    resolvedGrid = parsedObj.grid.map(row => row.map(cellSrc => resolveAssetSrc(base, cellSrc)));
+  }
+
+  const objEntry = {
+    id: uid(),
+    x, y, w, h,
+    grid: resolvedGrid,
+    src: resolveAssetSrc(base, parsedObj.image || parsedObj.src || parsedObj._image || null),
+    name: parsedObj.name || parsedObj.title || null,
+    preview: parsedObj._preview || parsedObj.preview || null
+  };
+  room.objects.push(objEntry);
+  renderGrid();
 }
 
 // --- Drag & drop into assets panel ---
@@ -419,7 +497,7 @@ assetsPanel.addEventListener('drop', async e=>{
   e.preventDefault(); assetsPanel.style.background=''; const items = Array.from(e.dataTransfer.files || []);
   for(const f of items){
     if(f.type.startsWith('image/')){ const d = await readFileAsDataURL(f); if(activeMode==='objects') assets.objects.push(d); else assets.tiles.push(d); }
-    else if(f.type==='application/json' || f.name.endsWith('.json')){ const txt = await f.text(); const parsed = safeParseJSON(txt); if(!parsed) continue; parsed.width = parsed.width || (Array.isArray(parsed.grid) && parsed.grid[0] ? parsed.grid[0].length : 1); parsed.height = parsed.height || (Array.isArray(parsed.grid) ? parsed.grid.length : 1); const preview = await makePreviewFromObjectJson(parsed).catch(()=>null); assets.objects.push({ type:'object', data: parsed, preview }); }
+    else if(f.type==='application/json' || f.name.endsWith('.json')){ const txt = await f.text(); const parsed = safeParseJSON(txt); if(!parsed) continue; parsed.width = parsed.width || (Array.isArray(parsed.grid) && parsed.grid[0] ? parsed.grid[0].length : 1); parsed.height = parsed.height || (Array.isArray(parsed.grid) ? parsed.grid.length : 1); try{ const blobUrl = URL.createObjectURL(new Blob([txt], { type: 'application/json' })); parsed._srcUrl = blobUrl; }catch(e){ parsed._srcUrl = null; } const preview = await makePreviewFromObjectJson(parsed, parsed._srcUrl).catch(()=>null); assets.objects.push({ type:'object', data: parsed, preview, srcUrl: parsed._srcUrl }); }
   }
   populateAssets();
 });
@@ -430,13 +508,15 @@ exportBtn.addEventListener('click', ()=>{ const data = JSON.stringify(room,null,
 saveRoomBtn.addEventListener('click', async ()=>{ const data = JSON.stringify(room,null,2); if('showSaveFilePicker' in window){ try{ const handle = await window.showSaveFilePicker({ suggestedName:(room.name||'room')+'.json', types:[{ description:'JSON', accept:{ 'application/json': ['.json'] } }] }); const writable = await handle.createWritable(); await writable.write(data); await writable.close(); alert('Saved successfully'); } catch(err){ alert('Save cancelled or failed: '+err); } } else { const blob = new Blob([data],{type:'application/json'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=(room.name||'room')+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }});
 
 // --- Clear helpers ---
-clearBtn.addEventListener('click', ()=>{ room.background = createEmptyGrid(room.width, room.height); renderGrid(); });
-clearObjectsBtn.addEventListener('click', ()=>{ room.objects = []; renderGrid(); });
+clearBtn.addEventListener('click', ()=>{ room.background = createEmptyGrid(room.width, room.height); renderGrid(); }); clearObjectsBtn.addEventListener('click', ()=>{ room.objects = []; renderGrid(); });
 
 // --- Init ---
 room.background = createEmptyGrid(room.width, room.height);
 tryLoadManifest();
 renderGrid();
+
+// Ensure palette is populated once page finishes loading (catch any race conditions)
+window.addEventListener('load', ()=>{ populateAssets(); });
 
 </script>
 </body>
