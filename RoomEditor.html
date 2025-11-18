@@ -220,7 +220,6 @@ resizeBtn.addEventListener('click',()=>{
 });
 
 // --- Asset manifest attempt ---
-// Improved: manifest can reference image files or .json object descriptors. If a .json is found, fetch and store its data
 async function tryLoadManifest(){
   try{
     const r1 = await fetch('/assets/objects/manifest.json');
@@ -384,7 +383,6 @@ objFiles.addEventListener('change', async e=>{
   }
   populateAssets();
 });
-
 tileFiles.addEventListener('change', async e=>{
   for(const f of e.target.files){ if(f.type.startsWith('image/')){ const dataUrl = await readFileAsDataURL(f); assets.tiles.push(dataUrl); } }
   populateAssets();
