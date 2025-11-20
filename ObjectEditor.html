@@ -59,7 +59,8 @@
   <div class="container">
     <h1>Object Editor</h1>
     <div class="flex-row">
-      <label class="option-label">Name: <input type="text" id="objName" style="font-size:1.1em; padding:5px 8px; border-radius:4px; border:1px solid #ccc;"></label>
+      <label class="option-label">Name: <input type="text" id="objName" style="font-size:1.1em; padding:5px 8px; border-radius:4px; border:1px solid #ccc;
+"></label>
       <label class="option-label">Size:
         <input type="number" min="1" id="objWidth" value="4" style="width:44px; font-size:1em;"> x
         <input type="number" min="1" id="objHeight" value="4" style="width:44px; font-size:1em;"> (tiles)
@@ -99,7 +100,7 @@
     </div>
     <button class="save-btn" onclick="saveObject()">Save Object</button>
     <button class="pick-btn" onclick="pickSaveLocation()">Choose Save Location (if supported)</button>
-    <div class="small-note">All slider settings are saved. If save location picker is not supported, file will be downloaded.</div>
+    <div class="small-note">All slider settings are saved. Tile entries will save as filenames/paths when available; embedded images are used as fallback.</div>
   </div>
 
 <script>
@@ -120,13 +121,15 @@ const speedVal = document.getElementById('speedVal');
 let grid = [];
 let fileHandle = null;
 
+// grid cells now hold both a preview URL and a filename/path when available.
+// cell: { enabled: boolean, tilePath: string|null, tileData: string|null, _file: File|null }
 function updateGrid() {
   const w = parseInt(objWidth.value, 10) || 1;
   const h = parseInt(objHeight.value, 10) || 1;
   while (grid.length < h) grid.push([]);
   grid = grid.slice(0, h);
   for (let y = 0; y < h; ++y) {
-    while (grid[y].length < w) grid[y].push({enabled: true, tile: null});
+    while (grid[y].length < w) grid[y].push({enabled: true, tilePath: null, tileData: null, _file: null});
     grid[y] = grid[y].slice(0, w);
   }
 
@@ -145,16 +148,41 @@ function updateGrid() {
       btn.title = cellData.enabled ? "Disable" : "Enable";
       btn.onclick = (ev) => {
         ev.stopPropagation();
+        // clear any file/preview when disabling
         cellData.enabled = !cellData.enabled;
-        if (!cellData.enabled) cellData.tile = null;
+        if (!cellData.enabled) {
+          cellData.tilePath = null;
+          if (cellData.tileData && cellData.tileData.startsWith('blob:')) {
+            URL.revokeObjectURL(cellData.tileData);
+          }
+          cellData.tileData = null;
+          cellData._file = null;
+        }
         updateGrid();
       };
       cell.appendChild(btn);
 
-      if (cellData.tile) {
+      // Show preview: prefer tileData (object URL or data URL) for display.
+      if (cellData.tileData) {
         const img = document.createElement('img');
-        img.src = cellData.tile;
+        img.src = cellData.tileData;
         img.className = 'tile-img';
+        cell.appendChild(img);
+      } else if (cellData.tilePath) {
+        // If only a path/filename is available, attempt to show it relative to page.
+        // This assumes images are accessible relative to the editor (e.g., in assets/).
+        const img = document.createElement('img');
+        img.src = cellData.tilePath;
+        img.className = 'tile-img';
+        img.onerror = () => {
+          // If the relative path doesn't load, show a placeholder text
+          img.style.display = 'none';
+          const span = document.createElement('span');
+          span.style.color = "#999";
+          span.textContent = cellData.tilePath;
+          span.style.fontSize = '11px';
+          cell.appendChild(span);
+        };
         cell.appendChild(img);
       } else {
         const span = document.createElement('span');
@@ -173,12 +201,22 @@ function updateGrid() {
       fileInput.style.display = 'block';
       fileInput.onchange = function(e) {
         if (e.target.files && e.target.files[0]) {
-          const reader = new FileReader();
-          reader.onload = function(ev) {
-            cellData.tile = ev.target.result;
-            updateGrid();
-          };
-          reader.readAsDataURL(e.target.files[0]);
+          const file = e.target.files[0];
+
+          // Store filename/path (note: browsers do not expose absolute local paths).
+          // We save the filename here so the exported JSON will reference that filename/path.
+          // For a reliable server-side path, upload the file to your server and set tilePath accordingly.
+          cellData.tilePath = file.name; // preferred short path/filename to write into JSON
+          cellData._file = file;
+
+          // For preview, use an object URL (fast and not base64-embedded).
+          // Keep tileData as the preview. If you prefer embedded data URLs as fallback, you can readAsDataURL here.
+          if (cellData.tileData && cellData.tileData.startsWith('blob:')) {
+            URL.revokeObjectURL(cellData.tileData);
+          }
+          cellData.tileData = URL.createObjectURL(file);
+
+          updateGrid();
         }
       };
       uploadLabel.appendChild(fileInput);
@@ -235,7 +273,11 @@ async function pickSaveLocation() {
 }
 
 async function saveObject() {
-  const obj = {
+  // Build object payload: prefer tilePath (filename or relative path) when present.
+  // If tilePath exists, the JSON will reference that path instead of embedding a long data URL.
+  // Note: to have working relative/server paths, ensure the referenced files are placed in the correct location
+  // (e.g., assets/) or upload the files to the server and set tilePath accordingly before saving.
+  const payload = {
     name: objName.value,
     width: parseInt(objWidth.value, 10) || 1,
     height: parseInt(objHeight.value, 10) || 1,
@@ -244,12 +286,17 @@ async function saveObject() {
     damagePerSecond: parseInt(dmgOpt.value, 10),
     lightEmission: parseInt(lightOpt.value, 10),
     speedEffect: parseInt(speedOpt.value, 10),
-    grid: grid.map(row => row.map(cell => ({
-      enabled: cell.enabled,
-      tile: cell.tile
-    })))
+    grid: grid.map(row => row.map(cell => {
+      // Prefer tilePath (filename/path). If not present but a preview/data URL exists, embed it as a fallback.
+      const tile = cell.tilePath ? cell.tilePath : (cell.tileData ? cell.tileData : null);
+      return {
+        enabled: cell.enabled,
+        tile: tile
+      };
+    }))
   };
-  const dataStr = JSON.stringify(obj, null, 2);
+
+  const dataStr = JSON.stringify(payload, null, 2);
 
   if (fileHandle && 'createWritable' in fileHandle) {
     try {
@@ -265,7 +312,7 @@ async function saveObject() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = (obj.name || "object") + ".json";
+    a.download = (payload.name || "object") + ".json";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
